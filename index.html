@@ -1,0 +1,33 @@
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>AI Image Generator</title>
+</head>
+
+<body>
+
+    <h1>AI Image Generator</h1>
+
+    <p>Text to Image</p>
+    <form action="/generate" method="post">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" name="prompt" placeholder="Describe the image you want..." rows="5" required></textarea>
+        <p></p>
+        <label for="negative-prompt">Negative Prompt</label>
+        <textarea id="negative-prompt" name="negative-prompt" placeholder="Describe what you don't want..." rows="5"></textarea>
+        <p></p>
+        <label for="width">Width</label>
+        <input type="number" id="width" name="width" placeholder="512(px)" min="1" max="2000" required>
+        <label for="height">Height</label>
+        <input type="number" id="height" name="height" placeholder="512 (px)" min="1" max="2000" required>
+        <p></p>
+        <button type="submit">Generate Image</button>
+
+    </form>
+    <p></p>
+    <div>Output</div>
+</body>
+
+</html>
