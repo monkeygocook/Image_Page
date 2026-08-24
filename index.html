@@ -1,0 +1,62 @@
+<body>
+
+    <header>
+        <nav>
+            <button>GenImage</button>
+            <button>Back</button>
+            <button>Icon</button>
+            <button>Tone</button>
+        </nav>
+    </header>
+
+    <main>
+
+        <section>
+            <h1>Text to Image</h1>
+
+            <form>
+
+                <label for="prompt">Prompt</label>
+                <textarea
+                    id="prompt"
+                    name="prompt"
+                    placeholder="Describe the image you want..."
+                    rows="5"
+                    required>
+                </textarea>
+
+                <label for="negative-prompt">Negative Prompt</label>
+                <textarea
+                    id="negative-prompt"
+                    name="negative-prompt"
+                    placeholder="Describe what you don't want..."
+                    rows="5">
+                </textarea>
+
+                <button type="submit">
+                    Generate
+                </button>
+
+            </form>
+        </section>
+
+
+        <section>
+
+            <h2>Output</h2>
+
+            <div>
+                <img
+                    src=""
+                    alt="Generated image">
+            </div>
+
+            <button>
+                Download
+            </button>
+
+        </section>
+
+    </main>
+
+</body>
