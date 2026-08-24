@@ -43,6 +43,7 @@ Project Image Page
 ### AI
 - [ ] เชื่อม AI เข้ากับ Database
 - [ ] ทำให้ AI ส่งรูป กลับไปที่ Frontend ได้
+- [x] สร้าง API
 
 
 ### จัดทำโดย
