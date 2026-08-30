@@ -1,3 +1,12 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Image Generator</title>
+</head>
+
 <body>
 
     <header>
@@ -17,21 +26,12 @@
             <form>
 
                 <label for="prompt">Prompt</label>
-                <textarea
-                    id="prompt"
-                    name="prompt"
-                    placeholder="Describe the image you want..."
-                    rows="5"
-                    required>
-                </textarea>
+                <textarea id="prompt" name="prompt" placeholder="Describe the image you want..." rows="5"
+                    required></textarea>
 
                 <label for="negative-prompt">Negative Prompt</label>
-                <textarea
-                    id="negative-prompt"
-                    name="negative-prompt"
-                    placeholder="Describe what you don't want..."
-                    rows="5">
-                </textarea>
+                <textarea id="negative-prompt" name="negative-prompt" placeholder="Describe what you don't want..."
+                    rows="5"></textarea>
 
                 <button type="submit">
                     Generate
@@ -45,10 +45,8 @@
 
             <h2>Output</h2>
 
-            <div>
-                <img
-                    src=""
-                    alt="Generated image">
+            <div class="output">
+                <img src="image/Sultry White Kitsune Accessories Set.png" alt="Generated image">
             </div>
 
             <button>
@@ -60,3 +58,5 @@
     </main>
 
 </body>
+
+</html>
