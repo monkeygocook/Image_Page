@@ -1,0 +1,45 @@
+h1 {
+    color: black;
+    font-family: Arial, sans-serif;
+}
+
+h2 {
+    color: black;
+    font-size: medium;
+    font-family: Arial, sans-serif;
+}
+
+.genimage,
+.back,
+.icon,
+.tone {
+    border: 2px solid rgb(204, 204, 204);
+    background-color: white;
+    padding: 10px 20px;
+    font-family: Arial, sans-serif;
+    cursor: pointer;
+}
+
+#prompt,
+#negative-prompt {
+    border: 2px solid rgb(204, 204, 204);
+    font-family: Arial, sans-serif;
+    padding: 10px;
+    resize: vertical;
+}
+
+.output {
+    border: 4px solid rgb(204, 204, 204);
+    width: 512px;
+    height: 768px;
+}
+
+
+.download {
+    border: 2px solid rgb(204, 204, 204);
+    background-color: white;
+    padding: 10px 20px;
+    font-family: Arial, sans-serif;
+    cursor: pointer;
+    margin: 20px 0;
+}

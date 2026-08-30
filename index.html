@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="css/style.css">
     <title>AI Image Generator</title>
 </head>
 
@@ -11,17 +12,17 @@
 
     <header>
         <nav>
-            <button>GenImage</button>
-            <button>Back</button>
-            <button>Icon</button>
-            <button>Tone</button>
+            <button class="genimage">GenImage</button>
+            <button class="back">Back</button>
+            <button class="icon">Icon</button>
+            <button class="tone">Tone</button>
         </nav>
     </header>
 
     <main>
 
         <section>
-            <h1>Text to Image</h1>
+            <h1>GenImage</h1>
 
             <form>
 
@@ -33,9 +34,7 @@
                 <textarea id="negative-prompt" name="negative-prompt" placeholder="Describe what you don't want..."
                     rows="5"></textarea>
 
-                <button type="submit">
-                    Generate
-                </button>
+                <button type="submit">Generate</button>
 
             </form>
         </section>
@@ -49,9 +48,7 @@
                 <img src="image/Sultry White Kitsune Accessories Set.png" alt="Generated image">
             </div>
 
-            <button>
-                Download
-            </button>
+            <button class="download">Download</button>
 
         </section>
 
