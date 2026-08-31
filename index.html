@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 
 <head>
     <meta charset="UTF-8">
@@ -10,55 +10,104 @@
 
 <body>
 
-    <header>
-        <nav>
-            <button class="genimage">GenImage</button>
-            <button class="back">Back</button>
-            <button class="icon">Icon</button>
-            <button class="tone">Tone</button>
-        </nav>
-    </header>
+    <div class="app">
 
-    <main>
+        <!-- ========== แถบบน: เมนูฟังก์ชัน + บัญชี + ตั้งค่า ========== -->
+        <header class="app-header">
 
-        <section>
-            <h1>GenImage</h1>
+            <nav class="tabs">
+                <button class="tab is-active" data-tab="genimage">GenImage</button>
+                <button class="tab" data-tab="back">Back</button>
+                <button class="tab" data-tab="icon">Icon</button>
+                <button class="tab" data-tab="tone">Tone</button>
 
-            <form>
+                <!-- ปุ่มดินสอ (ยังไม่ใช้งานตอนนี้) -->
+                <button class="icon-btn" id="editBtn" title="แก้ไข" aria-label="แก้ไข">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                    </svg>
+                </button>
+            </nav>
 
-                <label for="prompt" class="input-label">Prompt</label>
-                <textarea id="prompt" name="prompt" placeholder="Describe the image you want..." rows="5"
-                    class="prompt-input" required></textarea>
-
-                <label for="negative-prompt" class="input-label">Negative Prompt</label>
-                <textarea id="negative-prompt" name="negative-prompt" placeholder="Describe what you don't want..."
-                    rows="5" class="negative-prompt-input"></textarea>
-
-                <button type="submit" class="generate">Generate</button>
-
-            </form>
-        </section>
-
-
-        <section>
-
-            <h2>Output</h2>
-
-            <div class="image-container">
-                <img src="image/Beta_T.png" alt="Generated AI Image" class="ai-image">
-            </div>
-            <div class="modal" id="imageModal">
-                <span class="close">&times;</span>
-
-                <img class="modal-image" id="modalImage">
+            <div class="header-right">
+                <button class="avatar-btn" id="accountBtn" title="ล็อกอิน / บัญชี" aria-label="บัญชี">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5z" />
+                    </svg>
+                </button>
+                <button class="menu-btn" id="menuBtn" title="ตั้งค่าเพิ่มเติม" aria-label="เมนู">
+                    <span></span><span></span><span></span>
+                </button>
             </div>
 
-            <a href="image/Beta_T.png" download="my-generated-image.png" class="download-btn"><img
-                    src="image/Downloads_29996.png" alt="Download Icon"></a>
+        </header>
 
-        </section>
+        <!-- ========== เนื้อหา: ซ้าย = อินพุต / ขวา = ผลลัพธ์ ========== -->
+        <main class="app-body">
 
-    </main>
+            <!-- ---------- ฝั่งซ้าย ---------- -->
+            <section class="panel-input">
+                <form id="genForm">
+
+                    <label for="prompt" class="sr-only">Prompt</label>
+                    <textarea id="prompt" name="prompt" class="prompt-input" rows="5"
+                        placeholder="Prompt&#10;(Describe the image you want...)" required></textarea>
+
+                    <label for="negativePrompt" class="sr-only">Negative Prompt</label>
+                    <textarea id="negativePrompt" name="negativePrompt" class="prompt-input" rows="5"
+                        placeholder="Negative Prompt&#10;(Describe what you don't want...)"></textarea>
+
+                    <p class="error-msg" id="errorMsg" hidden></p>
+
+                    <button type="submit" class="btn-generate" id="generateBtn">Generate</button>
+
+                </form>
+            </section>
+
+            <!-- ---------- ฝั่งขวา ---------- -->
+            <section class="panel-output">
+
+                <div class="image-box" id="imageBox">
+
+                    <!-- สถานะ 1: ยังไม่มีรูป -->
+                    <div class="placeholder" id="placeholder">
+                        <svg viewBox="0 0 24 24">
+                            <path
+                                d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+                        </svg>
+                    </div>
+
+                    <!-- สถานะ 2: กำลังสร้าง -->
+                    <div class="loading" id="loading" hidden>
+                        <div class="spinner"></div>
+                        <span>กำลังสร้างภาพ...</span>
+                    </div>
+
+                    <!-- สถานะ 3: ได้รูปแล้ว -->
+                    <img id="resultImage" class="result-image" alt="ภาพที่สร้างจาก AI" hidden>
+
+                </div>
+
+                <button class="download-btn is-disabled" id="downloadBtn" disabled title="ดาวน์โหลดภาพ">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M12 3v10.59l3.3-3.3 1.4 1.42L12 17.41l-4.7-4.7 1.4-1.42 3.3 3.3V3h2zM5 19h14v2H5v-2z" />
+                    </svg>
+                </button>
+
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ========== Modal ดูรูปขนาดใหญ่ ========== -->
+    <div class="modal" id="imageModal">
+        <span class="modal-close" id="modalClose">&times;</span>
+        <img class="modal-image" id="modalImage" alt="ภาพขยาย">
+    </div>
+
     <script src="java/script.js"></script>
 </body>
 
