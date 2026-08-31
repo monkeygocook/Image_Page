@@ -1,115 +1,361 @@
-h1 {
-    color: black;
-    font-family: Arial, sans-serif;
+/* ========== ตัวแปรสี: แก้ที่เดียว เปลี่ยนทั้งเว็บ ========== */
+:root {
+    --blue-1: #29c1f5;
+    --blue-2: #2f6bff;
+    --orange-1: #ffc45c;
+    --orange-2: #ff8a3d;
+    --line: #d6d6d6;
+    --text: #333;
+    --muted: #9aa0a6;
 }
 
-h2 {
-    color: black;
-    font-size: medium;
-    font-family: Arial, sans-serif;
+* {
+    box-sizing: border-box;
+    /* ให้ padding/border ไม่ดันขนาดกล่อง คำนวณง่ายขึ้นมาก */
 }
 
-.genimage,
-.back,
-.icon,
-.tone {
-    border: 2px solid rgb(204, 204, 204);
-    background-color: white;
-    border-radius: 8px;
+body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 24px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: Arial, sans-serif;
+    color: var(--text);
+    background: #eef3fb;
+}
+
+/* ซ่อน label แต่ยังให้ screen reader อ่านได้ (ดีต่อ accessibility) */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+}
+
+/* ========== กรอบแอปสีฟ้า ========== */
+.app {
+    width: 100%;
+    max-width: 1000px;
+    background: linear-gradient(100deg, var(--blue-1), var(--blue-2));
+    border-radius: 16px;
+    padding: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}
+
+/* ========== แถบบน ========== */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 8px 0;
+}
+
+.tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.tab {
+    border: none;
+    background: rgba(255, 255, 255, 0.7);
+    color: #555;
+    font-family: inherit;
+    font-size: 14px;
     padding: 10px 20px;
-    font-family: Arial, sans-serif;
+    border-radius: 8px 8px 0 0;
     cursor: pointer;
+    transition: background 0.15s;
 }
 
-.input-label {
-    font-family: Arial, sans-serif;
+.tab:hover {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.tab.is-active {
+    background: #fff;
+    color: #111;
+    font-weight: bold;
+}
+
+/* ปุ่มไอคอนทั่วไป (ดินสอ) */
+.icon-btn {
+    width: 34px;
+    height: 34px;
+    margin-left: 6px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.icon-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: #2f6bff;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.avatar-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ff5f6d, #ff3b30);
+    cursor: pointer;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.avatar-btn svg {
+    width: 24px;
+    height: 24px;
+    fill: #fff;
+}
+
+.menu-btn {
+    width: 34px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 4px 0;
+}
+
+.menu-btn span {
+    display: block;
+    height: 3px;
+    border-radius: 2px;
+    background: #fff;
+}
+
+/* ========== พื้นที่เนื้อหาสีขาว ========== */
+.app-body {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+}
+
+/* ---------- ฝั่งซ้าย ---------- */
+.panel-input {
+    flex: 1;
+    min-width: 0;
+    /* กันไม่ให้ textarea ดันกล่องล้น */
 }
 
 .prompt-input {
     width: 100%;
-    height: 100%;
-    padding: 10px;
-    border: 1px solid rgb(204, 204, 204);
-    border-radius: 4px;
-    font-family: Arial, sans-serif;
-    margin-bottom: 10px;
+    min-height: 140px;
+    padding: 14px;
+    margin-bottom: 16px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
 }
 
-.generate {
-    background-color: orange;
-    padding: 10px 20px;
-    font-family: Arial, sans-serif;
+.prompt-input:focus {
+    outline: none;
+    border-color: var(--blue-2);
+    box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.15);
+}
+
+.prompt-input::placeholder {
+    color: var(--muted);
+}
+
+.btn-generate {
+    display: block;
+    margin: 8px auto 0;
+    width: 240px;
+    height: 66px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--orange-1), var(--orange-2));
+    color: #fff;
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: bold;
     cursor: pointer;
-    border: 0;
-    width: 200px;
-    height: 50px;
-    border-radius: 10px
+    transition: transform 0.15s, filter 0.15s;
 }
 
-.image-container {
+.btn-generate:hover {
+    filter: brightness(1.05);
+}
+
+.btn-generate:active {
+    transform: scale(0.97);
+}
+
+.btn-generate:disabled {
+    filter: grayscale(0.5);
+    cursor: not-allowed;
+}
+
+.error-msg {
+    margin: 0 0 10px;
+    color: #d93025;
+    font-size: 13px;
+}
+
+/* ---------- ฝั่งขวา ---------- */
+.panel-output {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* กล่องภาพ 2:3 ตามสเปก 512x768 */
+.image-box {
     width: 256px;
-    height: 384px;
+    aspect-ratio: 2 / 3;
+    border: 2px solid var(--line);
+    border-radius: 8px;
     overflow: hidden;
-    cursor: pointer;
-    border: 2px solid rgb(204, 204, 204);
-}
-
-.ai-image {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.modal {
-    display: none;
-
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-
-    background-color: rgba(0, 0, 0, 0.8);
-
+    background: #fafafa;
+    display: flex;
     justify-content: center;
     align-items: center;
+    position: relative;
+}
+
+.placeholder svg {
+    width: 56px;
+    height: 56px;
+    fill: #b8bfc6;
+}
+
+.result-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    cursor: zoom-in;
+}
+
+.loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.spinner {
+    width: 36px;
+    height: 36px;
+    border: 4px solid #e3e6ea;
+    border-top-color: var(--blue-2);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ปุ่มดาวน์โหลด */
+.download-btn {
+    margin-top: 14px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4facfe, #2f6bff);
+    cursor: pointer;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+    transition: transform 0.2s;
+}
+
+.download-btn svg {
+    width: 26px;
+    height: 26px;
+    fill: #fff;
+}
+
+.download-btn:active {
+    transform: scale(0.95);
+}
+
+.download-btn.is-disabled {
+    background: #c8ccd2;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+/* ========== Modal ========== */
+.modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    /* ย่อของ top/right/bottom/left: 0 */
+    background: rgba(0, 0, 0, 0.85);
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+}
+
+.modal.is-open {
+    display: flex;
 }
 
 .modal-image {
     max-width: 90%;
     max-height: 90%;
-
     object-fit: contain;
 }
 
-.download-btn {
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    width: 60px;
-    /* ความกว้างของวงกลม */
-    height: 60px;
-    /* ความสูงของวงกลม */
-    border-radius: 50%;
-    /* ทำมุมให้โค้งมนเป็นวงกลม 100% */
-    overflow: hidden;
-    /* ซ่อนส่วนที่เกินออกจากวงกลม */
-    /* ใส่เงาใต้ปุ่ม */
-    transition: transform 0.2s;
+.modal-close {
+    position: absolute;
+    top: 16px;
+    right: 28px;
+    color: #fff;
+    font-size: 42px;
+    line-height: 1;
     cursor: pointer;
-    margin-top: 15px;
+    user-select: none;
 }
 
-/* จัดการกับรูปภาพไอคอนภายในปุ่ม */
-.download-btn img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    /* ให้รูปขยายเต็มพื้นที่วงกลมพอดี */
-}
+/* ========== จอเล็ก: สลับเป็นเรียงลงมา ========== */
+@media (max-width: 780px) {
+    .app-body {
+        flex-direction: column;
+        align-items: stretch;
+    }
 
-/* เอฟเฟกต์ตอนกดคลิก */
-.download-btn:active {
-    transform: scale(0.95);
-    /* ปุ่มจะหดลงเล็กน้อยเวลาโดนกด */
+    .panel-output {
+        align-items: center;
+    }
+
+    .btn-generate {
+        width: 100%;
+    }
 }
