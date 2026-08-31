@@ -26,15 +26,15 @@
 
             <form>
 
-                <label for="prompt">Prompt</label>
+                <label for="prompt" class="input-label">Prompt</label>
                 <textarea id="prompt" name="prompt" placeholder="Describe the image you want..." rows="5"
-                    required></textarea>
+                    class="prompt-input" required></textarea>
 
-                <label for="negative-prompt">Negative Prompt</label>
+                <label for="negative-prompt" class="input-label">Negative Prompt</label>
                 <textarea id="negative-prompt" name="negative-prompt" placeholder="Describe what you don't want..."
-                    rows="5"></textarea>
+                    rows="5" class="negative-prompt-input"></textarea>
 
-                <button type="submit">Generate</button>
+                <button type="submit" class="generate">Generate</button>
 
             </form>
         </section>
@@ -44,16 +44,22 @@
 
             <h2>Output</h2>
 
-            <div class="output">
-                <img src="image/Sultry White Kitsune Accessories Set.png" alt="Generated image">
+            <div class="image-container">
+                <img src="image/Beta_T.png" alt="Generated AI Image" class="ai-image">
+            </div>
+            <div class="modal" id="imageModal">
+                <span class="close">&times;</span>
+
+                <img class="modal-image" id="modalImage">
             </div>
 
-            <button class="download">Download</button>
+            <a href="image/Beta_T.png" download="my-generated-image.png" class="download-btn"><img
+                    src="image/Downloads_29996.png" alt="Download Icon"></a>
 
         </section>
 
     </main>
-
+    <script src="java/script.js"></script>
 </body>
 
 </html>

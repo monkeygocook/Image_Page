@@ -15,31 +15,105 @@ h2 {
 .tone {
     border: 2px solid rgb(204, 204, 204);
     background-color: white;
+    border-radius: 8px;
     padding: 10px 20px;
     font-family: Arial, sans-serif;
     cursor: pointer;
 }
 
-#prompt,
-#negative-prompt {
-    border: 2px solid rgb(204, 204, 204);
+.input-label {
     font-family: Arial, sans-serif;
+}
+
+.prompt-input,
+.negative-prompt-input {
+    width: 300px;
+    height: 100px;
     padding: 10px;
-    resize: vertical;
+    border: 1px solid rgb(204, 204, 204);
+    border-radius: 4px;
+    font-family: Arial, sans-serif;
+    margin-bottom: 10px;
 }
 
-.output {
-    border: 4px solid rgb(204, 204, 204);
-    width: 512px;
-    height: 768px;
-}
-
-
-.download {
-    border: 2px solid rgb(204, 204, 204);
-    background-color: white;
+.generate {
+    background-color: orange;
     padding: 10px 20px;
     font-family: Arial, sans-serif;
     cursor: pointer;
-    margin: 20px 0;
+    border: 0;
+    width: 200px;
+    height: 50px;
+    border-radius: 10px
+}
+
+.image-container {
+    width: 256px;
+    height: 384px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid rgb(204, 204, 204);
+}
+
+.ai-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.modal {
+    display: none;
+
+    position: fixed;
+    z-index: 1000;
+
+    left: 0;
+    top: 0;
+
+    width: 100%;
+    height: 100%;
+
+    background: rgba(0, 0, 0, 0.8);
+
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-image {
+    max-width: 90%;
+    max-height: 90%;
+
+    object-fit: contain;
+}
+
+.download-btn {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 60px;
+    /* ความกว้างของวงกลม */
+    height: 60px;
+    /* ความสูงของวงกลม */
+    border-radius: 50%;
+    /* ทำมุมให้โค้งมนเป็นวงกลม 100% */
+    overflow: hidden;
+    /* ซ่อนส่วนที่เกินออกจากวงกลม */
+    /* ใส่เงาใต้ปุ่ม */
+    transition: transform 0.2s;
+    cursor: pointer;
+    margin-top: 15px;
+}
+
+/* จัดการกับรูปภาพไอคอนภายในปุ่ม */
+.download-btn img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    /* ให้รูปขยายเต็มพื้นที่วงกลมพอดี */
+}
+
+/* เอฟเฟกต์ตอนกดคลิก */
+.download-btn:active {
+    transform: scale(0.95);
+    /* ปุ่มจะหดลงเล็กน้อยเวลาโดนกด */
 }
