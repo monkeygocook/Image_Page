@@ -4,35 +4,35 @@ const API_URL = "http://localhost:8000/api/generate";
 const MOCK_IMAGE = "image/Beta_T.png";   // รูปตัวอย่างที่คุณมีอยู่แล้ว
 
 // ===================== อ้างอิง Element =====================
-const genForm = document.getElementById("genForm");
-const promptEl = document.getElementById("prompt");
-const negativeEl = document.getElementById("negativePrompt");
-const generateBtn = document.getElementById("generateBtn");
-const errorMsg = document.getElementById("errorMsg");
+const genForm = document.getElementById("genForm"); // ฟอร์ม GenImage
+const promptEl = document.getElementById("prompt"); // กล่อง Prompt
+const negativeEl = document.getElementById("negativePrompt"); // กล่อง Negative Prompt
+const generateBtn = document.getElementById("generateBtn"); // ปุ่ม Generate
+const errorMsg = document.getElementById("errorMsg");  // กล่องข้อความแจ้งข้อผิดพลาด
 
-const placeholder = document.getElementById("placeholder");
-const loading = document.getElementById("loading");
-const resultImage = document.getElementById("resultImage");
-const downloadBtn = document.getElementById("downloadBtn");
+const placeholder = document.getElementById("placeholder"); // กล่อง placeholder
+const loading = document.getElementById("loading"); // กล่อง loading
+const resultImage = document.getElementById("resultImage"); // รูปที่สร้างเสร็จแล้ว
+const downloadBtn = document.getElementById("downloadBtn"); // ปุ่มดาวน์โหลด
 
-const modal = document.getElementById("imageModal");
-const modalImage = document.getElementById("modalImage");
-const modalClose = document.getElementById("modalClose");
+const modal = document.getElementById("imageModal"); // กล่อง modal
+const modalImage = document.getElementById("modalImage"); // รูปใน modal
+const modalClose = document.getElementById("modalClose"); // ปุ่มปิด modal
 
 let currentImageUrl = null;   // เก็บ URL รูปล่าสุดไว้ให้ปุ่มดาวน์โหลด
 
 
 // ===================== 1) สลับแท็บเมนู =====================
-document.querySelectorAll(".tab").forEach(function (tab) {
-    tab.addEventListener("click", function () {
-        document.querySelectorAll(".tab").forEach(t => t.classList.remove("is-active"));
-        tab.classList.add("is-active");
+document.querySelectorAll(".tab").forEach(function (tab) { // วนลูปทุกแท็บ
+    tab.addEventListener("click", function () { // เมื่อคลิกแท็บ
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("is-active")); // เอา class is-active ออกจากทุกแท็บ
+        tab.classList.add("is-active"); // เพิ่ม class is-active ให้แท็บที่คลิก
 
         // ตอนนี้ทำแค่ฟังก์ชัน GenImage ฟังก์ชันอื่นค่อยเพิ่มทีหลัง
-        if (tab.dataset.tab !== "genimage") {
-            alert("ฟังก์ชัน " + tab.textContent + " ยังไม่เปิดใช้งานครับ");
-            document.querySelectorAll(".tab").forEach(t => t.classList.remove("is-active"));
-            document.querySelector('[data-tab="genimage"]').classList.add("is-active");
+        if (tab.dataset.tab !== "genimage") { // ถ้าไม่ใช่แท็บ GenImage
+            alert("ฟังก์ชัน " + tab.textContent + " ยังไม่เปิดใช้งานครับ"); // แจ้งเตือน
+            document.querySelectorAll(".tab").forEach(t => t.classList.remove("is-active")); // เอา class is-active ออกจากทุกแท็บ
+            document.querySelector('[data-tab="genimage"]').classList.add("is-active"); // เพิ่ม class is-active ให้แท็บ GenImage
         }
     });
 });
@@ -131,23 +131,33 @@ genForm.addEventListener("submit", async function (event) {
 downloadBtn.addEventListener("click", async function () {
     if (!currentImageUrl) return;
 
+    const fileName = "genimage-" + Date.now() + ".png";
+
     try {
-        // ดึงไฟล์มาเป็น blob ก่อน เพื่อให้ดาวน์โหลดได้แม้รูปมาจากคนละโดเมน
-        const response = await fetch(currentImageUrl); // ดึงไฟล์จาก URL
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
+        // วิธีหลัก: ดึงเป็น blob (ใช้ได้กับรูปจากเซิร์ฟเวอร์คนละโดเมน)
+        const response = await fetch(currentImageUrl); // อาจเกิด CORS ถ้าเซิร์ฟเวอร์ไม่อนุญาต
+        const blob = await response.blob(); // แปลงเป็น blob
+        const blobUrl = URL.createObjectURL(blob); // สร้าง URL ชั่วคราวจาก blob
 
-        const link = document.createElement("a"); // สร้างลิงก์ชั่วคราว
-        link.href = blobUrl;
-        link.download = "genimage-" + Date.now() + ".png";
-        link.click();
+        triggerDownload(blobUrl, fileName); // สั่งดาวน์โหลด
+        URL.revokeObjectURL(blobUrl); // ลบ URL ชั่วคราวทิ้งหลังดาวน์โหลดเสร็จ
 
-        URL.revokeObjectURL(blobUrl);   // คืนหน่วยความจำ
     } catch (err) {
-        console.error(err);
-        showError("ดาวน์โหลดไม่สำเร็จครับ");
+        // วิธีสำรอง: ลิงก์ตรง (ใช้ได้ตอนเปิดไฟล์แบบ file:///)
+        console.warn("fetch ไม่ผ่าน ใช้วิธีสำรองแทน:", err); // อาจเกิด CORS หรือไฟล์ไม่อยู่แล้ว
+        triggerDownload(currentImageUrl, fileName);
     }
 });
+
+// สร้างลิงก์ชั่วคราวแล้วสั่งคลิกอัตโนมัติ
+function triggerDownload(url, fileName) { // url = blob หรือ url ปกติ
+    const link = document.createElement("a"); // สร้าง <a> ชั่วคราว
+    link.href = url; // กำหนด URL ของไฟล์
+    link.download = fileName;
+    document.body.appendChild(link); // ต้องแปะก่อนถึงจะสั่งคลิกได้
+    link.click();
+    document.body.removeChild(link); // ลบ <a> ชั่วคราวออก
+}
 
 
 // ===================== 6) Modal ดูรูปใหญ่ =====================
