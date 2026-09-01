@@ -1,4 +1,4 @@
-// ===================== ตั้งค่า =====================
+// ===================== ตั้งค่า =============================
 const USE_MOCK = true;   // true = จำลองผล (ยังไม่มีหลังบ้าน) | false = ยิง API จริง
 const API_URL = "http://localhost:8000/api/generate";
 const MOCK_IMAGE = "image/Beta_T.png";   // รูปตัวอย่างที่คุณมีอยู่แล้ว
@@ -105,8 +105,8 @@ genForm.addEventListener("submit", async function (event) {
     event.preventDefault();          // กัน browser refresh หน้า
     showError("");
 
-    const prompt = promptEl.value.trim();
-    const negativePrompt = negativeEl.value.trim();
+    const prompt = promptEl.value.trim(); // เอา space หน้า-หลังออก
+    const negativePrompt = negativeEl.value.trim(); // เอา space หน้า-หลังออก
 
     if (prompt === "") {
         showError("กรุณากรอก Prompt ก่อนครับ");
@@ -117,7 +117,7 @@ genForm.addEventListener("submit", async function (event) {
     setImageState("loading");
 
     try {
-        const url = await generateImage(prompt, negativePrompt);
+        const url = await generateImage(prompt, negativePrompt); // เรียกหลังบ้าน
         setImageState("done", url);
     } catch (err) {
         console.error(err);
@@ -133,11 +133,11 @@ downloadBtn.addEventListener("click", async function () {
 
     try {
         // ดึงไฟล์มาเป็น blob ก่อน เพื่อให้ดาวน์โหลดได้แม้รูปมาจากคนละโดเมน
-        const response = await fetch(currentImageUrl);
+        const response = await fetch(currentImageUrl); // ดึงไฟล์จาก URL
         const blob = await response.blob();
         const blobUrl = URL.createObjectURL(blob);
 
-        const link = document.createElement("a");
+        const link = document.createElement("a"); // สร้างลิงก์ชั่วคราว
         link.href = blobUrl;
         link.download = "genimage-" + Date.now() + ".png";
         link.click();
@@ -151,20 +151,20 @@ downloadBtn.addEventListener("click", async function () {
 
 
 // ===================== 6) Modal ดูรูปใหญ่ =====================
-resultImage.addEventListener("click", function () {
+resultImage.addEventListener("click", function () { // คลิกที่รูปเล็ก
     modalImage.src = resultImage.src;
     modal.classList.add("is-open");
 });
 
-modal.addEventListener("click", function () {
+modal.addEventListener("click", function () { // คลิกที่พื้นหลัง
     modal.classList.remove("is-open");
 });
 
-modalClose.addEventListener("click", function () {
+modalClose.addEventListener("click", function () { // คลิกที่ปุ่มปิด
     modal.classList.remove("is-open");
 });
 
-document.addEventListener("keydown", function (e) {
+document.addEventListener("keydown", function (e) { // กดปุ่ม Escape ปิด modal
     if (e.key === "Escape") modal.classList.remove("is-open");
 });
 

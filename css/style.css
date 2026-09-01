@@ -12,12 +12,12 @@
     box-sizing: border-box;
 }
 
-/* ⭐ แก้บั๊กข้อ 1: บังคับให้ hidden ชนะเสมอ */
+/* แก้บั๊กข้อ 1: บังคับให้ hidden ชนะเสมอ */
 [hidden] {
     display: none !important;
 }
 
-/* ⭐ แก้ข้อ 2: ให้เต็มจอ */
+/* แก้ข้อ 2: ให้เต็มจอ */
 html,
 body {
     height: 100%;
@@ -30,6 +30,7 @@ body {
 }
 
 .sr-only {
+    /* สำหรับ screen reader */
     position: absolute;
     width: 1px;
     height: 1px;
@@ -151,7 +152,7 @@ body {
 /* ========== เนื้อหาสีขาว: ยืดเต็มพื้นที่ที่เหลือ ========== */
 .app-body {
     flex: 1 1 auto;
-    /* ⭐ กินพื้นที่ที่เหลือทั้งหมด */
+    /* กินพื้นที่ที่เหลือทั้งหมด */
     min-height: 0;
     background: #fff;
     border-radius: 12px;
@@ -175,8 +176,9 @@ body {
 }
 
 .prompt-input {
+    /* ช่องพิมพ์ Prompt และ Negative Prompt */
     flex: 1 1 auto;
-    /* ⭐ ช่องพิมพ์ยืดตามความสูงจอ */
+    /* ช่องพิมพ์ยืดตามความสูงจอ */
     width: 100%;
     min-height: 120px;
     padding: 16px;
@@ -190,6 +192,7 @@ body {
 }
 
 .prompt-input:focus {
+    /* ขอบสีฟ้าเมื่อ focus */
     outline: none;
     border-color: var(--blue-2);
     box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.15);
@@ -200,6 +203,7 @@ body {
 }
 
 .btn-generate {
+    /* ปุ่ม Generate */
     flex: 0 0 auto;
     align-self: center;
     margin-top: 8px;
@@ -208,6 +212,7 @@ body {
     border: none;
     border-radius: 14px;
     background: linear-gradient(135deg, var(--orange-1), var(--orange-2));
+    /* สีส้มไล่เฉด */
     color: #fff;
     font-family: inherit;
     font-size: 20px;
@@ -217,14 +222,17 @@ body {
 }
 
 .btn-generate:hover {
+    /* hover สีส้มเข้มขึ้น */
     filter: brightness(1.05);
 }
 
 .btn-generate:active {
+    /* กดปุ่มย่อเล็กลง */
     transform: scale(0.97);
 }
 
 .btn-generate:disabled {
+    /* ตอนยังไม่มี Prompt: ทำให้ปุ่มสีจางลง */
     filter: grayscale(0.5);
     cursor: not-allowed;
 }
@@ -245,7 +253,7 @@ body {
     justify-content: center;
 }
 
-/* ⭐ กล่องภาพโตตามความสูงจอ แต่คงสัดส่วน 2:3 เสมอ */
+/* กล่องภาพโตตามความสูงจอ แต่คงสัดส่วน 2:3 เสมอ */
 .image-box {
     height: min(70vh, 720px);
     aspect-ratio: 2 / 3;
@@ -296,7 +304,7 @@ body {
     }
 }
 
-/* ⭐ ข้อ 3: ปุ่มดาวน์โหลดใช้ไอคอนของคุณเอง */
+/* ข้อ 3: ปุ่มดาวน์โหลดใช้ไอคอนของคุณเอง */
 .download-btn {
     margin-top: 18px;
     width: 60px;
