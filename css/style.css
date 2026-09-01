@@ -202,6 +202,81 @@ body {
     color: var(--muted);
 }
 
+/* ========== แถบเครื่องมือเหนือช่อง prompt ========== */
+.prompt-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    min-height: 22px;
+}
+
+.save-hint {
+    font-size: 13px;
+    color: var(--muted);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.save-hint.is-visible {
+    opacity: 1;
+}
+
+.btn-text {
+    border: none;
+    background: none;
+    padding: 2px 6px;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.btn-text:hover {
+    color: #d93025;
+    background: #fdecea;
+}
+
+/* ========== แถวปุ่ม Generate / ยกเลิก ========== */
+.action-row {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.btn-cancel {
+    width: 300px;
+    height: 74px;
+    border: 2px solid #e0e3e7;
+    border-radius: 14px;
+    background: #fff;
+    color: #5f6368;
+    font-family: inherit;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn-cancel:hover {
+    background: #fdecea;
+    border-color: #f4b8b2;
+    color: #d93025;
+}
+
+.btn-cancel:active {
+    transform: scale(0.97);
+}
+
+@media (max-width: 900px) {
+    .btn-cancel {
+        width: 100%;
+    }
+}
+
 .btn-generate {
     /* ปุ่ม Generate */
     flex: 0 0 auto;

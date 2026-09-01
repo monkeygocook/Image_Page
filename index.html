@@ -51,17 +51,24 @@
             <section class="panel-input"> <!-- อินพุต Prompt -->
                 <form id="genForm">
 
-                    <label for="prompt" class="sr-only">Prompt</label>
-                    <textarea id="prompt" name="prompt" class="prompt-input" rows="5"
-                        placeholder="Prompt&#10;(Describe the image you want...)" required></textarea>
+                    <div class="prompt-toolbar">
+                        <span class="save-hint" id="saveHint"></span>
+                        <button type="button" class="btn-text" id="clearBtn">ล้าง Prompt</button>
+                    </div>
 
-                    <label for="negativePrompt" class="sr-only">Negative Prompt</label>
-                    <textarea id="negativePrompt" name="negativePrompt" class="prompt-input" rows="5"
+                    <label for="promptInput" class="sr-only">Prompt</label>
+                    <textarea id="promptInput" name="prompt" class="prompt-input" rows="5"
+                        placeholder="Prompt&#10;(Describe the image you want...)"></textarea>
+                    <label for="negativeInput" class="sr-only">Negative Prompt</label>
+                    <textarea id="negativeInput" name="negativePrompt" class="prompt-input" rows="5"
                         placeholder="Negative Prompt&#10;(Describe what you don't want...)"></textarea>
 
                     <p class="error-msg" id="errorMsg" hidden></p>
 
-                    <button type="submit" class="btn-generate" id="generateBtn">Generate</button>
+                    <div class="action-row">
+                        <button type="submit" class="btn-generate" id="generateBtn">Generate</button>
+                        <button type="button" class="btn-cancel" id="cancelBtn" hidden>ยกเลิก</button>
+                    </div>
 
                 </form>
             </section>
@@ -101,12 +108,12 @@
     </div>
 
     <!-- ========== Modal ดูรูปขนาดใหญ่ ========== -->
-    <div class="modal" id="imageModal">
+    <div class="modal" id="modal">
         <span class="modal-close" id="modalClose">&times;</span>
         <img class="modal-image" id="modalImage" alt="ภาพขยาย">
     </div>
 
-    <script src="js/script.js"></script>
+    <script src="js/script.js" defer></script>
 </body>
 
 </html>
