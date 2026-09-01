@@ -30,14 +30,14 @@
                 </button>
             </nav>
 
-            <div class="header-right">
+            <div class="header-right"> <!-- ปุ่มบัญชี + ปุ่มเมนู -->
                 <button class="avatar-btn" id="accountBtn" title="ล็อกอิน / บัญชี" aria-label="บัญชี">
                     <svg viewBox="0 0 24 24">
                         <path
                             d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5z" />
                     </svg>
                 </button>
-                <button class="menu-btn" id="menuBtn" title="ตั้งค่าเพิ่มเติม" aria-label="เมนู">
+                <button class="menu-btn" id="menuBtn" title="ตั้งค่าเพิ่มเติม" aria-label="เมนู"> <!-- ปุ่มเมนู -->
                     <span></span><span></span><span></span>
                 </button>
             </div>
@@ -48,7 +48,7 @@
         <main class="app-body">
 
             <!-- ---------- ฝั่งซ้าย ---------- -->
-            <section class="panel-input">
+            <section class="panel-input"> <!-- อินพุต Prompt -->
                 <form id="genForm">
 
                     <label for="prompt" class="sr-only">Prompt</label>
@@ -67,7 +67,7 @@
             </section>
 
             <!-- ---------- ฝั่งขวา ---------- -->
-            <section class="panel-output">
+            <section class="panel-output"> <!-- แสดงผลลัพธ์รูปที่สร้าง -->
 
                 <div class="image-box" id="imageBox">
 
@@ -90,11 +90,9 @@
 
                 </div>
 
+                <!-- ปุ่มดาวน์โหลด -->
                 <button class="download-btn is-disabled" id="downloadBtn" disabled title="ดาวน์โหลดภาพ">
-                    <svg viewBox="0 0 24 24"> <!-- ไอคอนดาวน์โหลด -->
-                        <path
-                            d="M12 3v10.59l3.3-3.3 1.4 1.42L12 17.41l-4.7-4.7 1.4-1.42 3.3 3.3V3h2zM5 19h14v2H5v-2z" />
-                    </svg>
+                    <img src="image/Downloads_29996.png" alt="ดาวน์โหลด">
                 </button>
 
             </section>
