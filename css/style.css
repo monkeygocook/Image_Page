@@ -16,6 +16,12 @@
     box-sizing: border-box
 }
 
+/* กัน display:* ทับ hidden attribute ทั้งโปรเจกต์ */
+[hidden] {
+    display: none !important
+}
+
+
 body {
     margin: 0;
     font-family: "Segoe UI", system-ui, "Noto Sans Thai", sans-serif;
@@ -90,7 +96,7 @@ body {
     box-shadow: 0 -2px 8px rgba(0, 0, 0, .12)
 }
 
-.icon-btn {
+.group .icon-btn {
     border: 0;
     background: rgba(255, 255, 255, .55);
     width: 38px;
@@ -191,10 +197,6 @@ body {
 
 .group {
     margin-bottom: 16px
-}
-
-.group[hidden] {
-    display: none
 }
 
 textarea,
@@ -530,10 +532,6 @@ select:focus {
     display: grid;
     place-items: center;
     padding: 18px
-}
-
-.modal[hidden] {
-    display: none
 }
 
 .modal-box {

@@ -182,25 +182,29 @@ function setFile(file) {
 }
 
 function clearFile() {
-    if (previewURL) URL.revokeObjectURL(previewURL);
-    previewURL = null; currentFile = null;
+    if (previewURL && previewURL !== resultURL) URL.revokeObjectURL(previewURL);
+    previewURL = null;
+    currentFile = null;
     $("fileInput").value = "";
+    $("thumb").removeAttribute("src");     // 👈 เพิ่ม
     $("dropZone").hidden = false;
     $("filePreview").hidden = true;
 }
+
 
 /* ============================================================
    4. ผลลัพธ์ / ดาวน์โหลด / เทียบก่อน-หลัง
    ============================================================ */
 function clearResult() {
-    if (resultURL) URL.revokeObjectURL(resultURL);
+    if (resultURL?.startsWith("blob:") && resultURL !== previewURL) URL.revokeObjectURL(resultURL);
     resultURL = beforeURL = null;
+    ["resultImage", "soloImage", "beforeImage"].forEach((id) => $(id).removeAttribute("src"));
     $("compareWrap").hidden = true;
     $("soloImage").hidden = true;
     $("resultEmpty").hidden = false;
     $("compareToggleWrap").hidden = true;
     $("btnDownload").disabled = true;
-    $("resultImage").style.filter = "";
+    $("resultImage").style.filter = $("soloImage").style.filter = "";
 }
 
 function showResult(url, beforeSrc) {
