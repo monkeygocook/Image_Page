@@ -1,312 +1,506 @@
-"use strict";
+/* ============================================================
+   script.js — ทั้งหมดของหน้าบ้าน
+   ============================================================ */
+const $ = (id) => document.getElementById(id);
+
+/* ---------- State ---------- */
+let lang = localStorage.getItem(STORE + "lang") || "th";
+let user = JSON.parse(localStorage.getItem(STORE + "session") || "null");
+let currentTab = null;
+let currentFile = null;
+let previewURL = null;
+let resultURL = null;
+let beforeURL = null;
+let optionState = {};
+let tabPrefs = null;
+let authMode = "login";
+
+/* ---------- i18n ---------- */
+const t = (k, vars = {}) =>
+    (I18N[lang][k] || k).replace(/\{(\w+)\}/g, (_, n) => vars[n] ?? "");
+const L = (o) => (typeof o === "string" ? o : o?.[lang] ?? "");
+
+function applyI18n() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
+    document.querySelectorAll("[data-i18n-ph]").forEach((el) => (el.placeholder = t(el.dataset.i18nPh)));
+    $("mockBadge").textContent = t("badge.mock");
+    $("popAuthLabel").textContent = user ? t("nav.logout") : t("nav.login");
+    $("popName").textContent = user ? user.name : t("nav.guest");
+    $("popMail").textContent = user ? user.email : "";
+    $("avatarText").textContent = user ? user.name.slice(0, 1).toUpperCase() : "?";
+    renderTabBar();
+    if (currentTab) switchTab(currentTab, true);
+}
+
+/* ---------- Storage ต่อผู้ใช้ ---------- */
+const uKey = (k) => `${STORE}${user ? user.email : "guest"}:${k}`;
 
 /* ============================================================
-   0) อ้างอิง Element ทั้งหมด
+   1. Tab bar + ตัวจัดการแท็บ (ดินสอ)
    ============================================================ */
-const genForm = document.getElementById("genForm");
-const promptInput = document.getElementById("promptInput");
-const negativeInput = document.getElementById("negativeInput");
-const generateBtn = document.getElementById("generateBtn");
-const cancelBtn = document.getElementById("cancelBtn");
-const clearBtn = document.getElementById("clearBtn");
-const saveHint = document.getElementById("saveHint");
-const errorMsg = document.getElementById("errorMsg");
+function loadTabPrefs() {
+    const saved = JSON.parse(localStorage.getItem(uKey("tabs")) || "null");
+    const valid = saved?.filter((x) => TAB_CONFIG[x.id]);
+    tabPrefs = valid?.length ? valid : TAB_ORDER.map((id) => ({ id, on: true }));
+    TAB_ORDER.forEach((id) => {                       // เผื่อเพิ่มแท็บใหม่ในอนาคต
+        if (!tabPrefs.some((x) => x.id === id)) tabPrefs.push({ id, on: true });
+    });
+}
+const saveTabPrefs = () => localStorage.setItem(uKey("tabs"), JSON.stringify(tabPrefs));
+const visibleTabs = () => tabPrefs.filter((x) => x.on).map((x) => x.id);
 
-const placeholder = document.getElementById("placeholder");
-const loading = document.getElementById("loading");
-const resultImage = document.getElementById("resultImage");
-const downloadBtn = document.getElementById("downloadBtn");
+function renderTabBar() {
+    const bar = $("tabBar");
+    bar.innerHTML = "";
+    visibleTabs().forEach((id) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "tab" + (id === currentTab ? " active" : "");
+        b.textContent = TAB_CONFIG[id].label;
+        b.dataset.tab = id;
+        b.onclick = () => switchTab(id);
+        bar.appendChild(b);
+    });
+}
 
-const modal = document.getElementById("modal");
-const modalImage = document.getElementById("modalImage");
-const modalClose = document.getElementById("modalClose");
+function renderTabManager() {
+    const ul = $("tabsList");
+    ul.innerHTML = "";
+    const onCount = visibleTabs().length;
+    tabPrefs.forEach((item, i) => {
+        const li = document.createElement("li");
+        li.innerHTML = `
+      <input type="checkbox" ${item.on ? "checked" : ""} ${item.on && onCount === 1 ? "disabled" : ""}>
+      <strong>${TAB_CONFIG[item.id].label}</strong>
+      <button type="button" class="mini" ${i === 0 ? "disabled" : ""}>↑</button>
+      <button type="button" class="mini" ${i === tabPrefs.length - 1 ? "disabled" : ""}>↓</button>`;
+        const [chk, , up, down] = li.children;
+        chk.onchange = () => {
+            item.on = chk.checked;
+            commitTabs();
+        };
+        up.onclick = () => { [tabPrefs[i - 1], tabPrefs[i]] = [tabPrefs[i], tabPrefs[i - 1]]; commitTabs(); };
+        down.onclick = () => { [tabPrefs[i + 1], tabPrefs[i]] = [tabPrefs[i], tabPrefs[i + 1]]; commitTabs(); };
+        ul.appendChild(li);
+    });
+    $("tabsWarn").hidden = onCount > 1;
+}
 
-/* ตัวแปรสถานะ */
-let currentImageUrl = null;   // URL ของภาพที่แสดงอยู่
-let controller = null;   // AbortController ของรอบที่กำลังทำงาน
-
+function commitTabs() {
+    saveTabPrefs();
+    renderTabManager();
+    renderTabBar();
+    if (!visibleTabs().includes(currentTab)) switchTab(visibleTabs()[0]);
+}
 
 /* ============================================================
-   1) จำ Prompt ด้วย localStorage
+   2. switchTab + renderOptions
    ============================================================ */
-const STORAGE_KEY = "genimage:prompts";
-const SAVE_DELAY = 500;      // หน่วง 0.5 วิ ค่อยบันทึก (debounce)
-let saveTimer = null;
+function switchTab(name, keepResult = false) {
+    currentTab = name;
+    const cfg = TAB_CONFIG[name];
 
-/* --- โหลด Prompt ที่บันทึกไว้ตอนเปิดหน้า --- */
-function loadPrompts() {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
 
-        const data = JSON.parse(raw);
-        promptInput.value = data.prompt || "";
-        negativeInput.value = data.negative || "";
+    /* --- Prompt: เฉพาะแท็บที่ใช้จริง --- */
+    $("promptGroup").hidden = !cfg.usesPrompt;
+    [$("promptInput"), $("negativeInput")].forEach((el) => (el.disabled = !cfg.usesPrompt));
+    if (!cfg.usesPrompt) { $("promptInput").value = ""; $("negativeInput").value = ""; }
 
-        if (data.prompt || data.negative) {
-            showHint("กู้คืน Prompt ล่าสุดแล้ว");
+    /* --- Uploader --- */
+    $("uploaderGroup").hidden = !cfg.needsFile;
+    if (!cfg.needsFile) clearFile();
+    $("dzHint").textContent = L(cfg.hint);
+
+    renderOptions(cfg);
+    $("submitBtn").textContent = L(cfg.cta);
+    showHint(L(cfg.hint), true);
+    if (!keepResult) clearResult();
+    syncURL();
+}
+
+function renderOptions(cfg) {
+    const box = $("optionsGroup");
+    box.innerHTML = "";
+    optionState = {};
+    Object.entries(cfg.fields || {}).forEach(([key, f]) => {
+        optionState[key] = f.default;
+        const wrap = document.createElement("div");
+        wrap.className = "opt";
+
+        if (f.kind === "enum") {
+            wrap.innerHTML = `<span class="opt-label">${L(f.label)}</span><div class="chips"></div>`;
+            const chips = wrap.querySelector(".chips");
+            f.values.forEach((v) => {
+                const c = document.createElement("button");
+                c.type = "button";
+                c.className = "chip" + (v.v === f.default ? " on" : "");
+                c.textContent = v[lang];
+                c.onclick = () => {
+                    optionState[key] = v.v;
+                    chips.querySelectorAll(".chip").forEach((x) => x.classList.remove("on"));
+                    c.classList.add("on");
+                };
+                chips.appendChild(c);
+            });
+        } else if (f.kind === "bool") {
+            wrap.innerHTML = `<label class="chk"><input type="checkbox" ${f.default ? "checked" : ""}>
+        <span>${L(f.label)}</span></label>`;
+            wrap.querySelector("input").onchange = (e) => (optionState[key] = e.target.checked);
+        } else if (f.kind === "range") {
+            wrap.innerHTML = `<span class="opt-label">${L(f.label)}</span>
+        <div class="range-row">
+          <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${f.default}">
+          <span class="range-val">${f.default}${f.suffix || ""}</span>
+        </div>`;
+            const [inp, out] = [wrap.querySelector("input"), wrap.querySelector(".range-val")];
+            inp.oninput = () => { optionState[key] = +inp.value; out.textContent = inp.value + (f.suffix || ""); };
         }
-    } catch (err) {
-        console.warn("อ่าน localStorage ไม่ได้:", err);
-    }
+        box.appendChild(wrap);
+    });
 }
-
-/* --- บันทึก (แบบ debounce) --- */
-function savePrompts() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(function () {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                prompt: promptInput.value,
-                negative: negativeInput.value,
-                savedAt: Date.now()
-            }));
-            showHint("บันทึกแล้ว");
-        } catch (err) {
-            console.warn("เขียน localStorage ไม่ได้:", err);
-        }
-    }, SAVE_DELAY);
-}
-
-/* --- ข้อความแจ้งเตือนเล็ก ๆ --- */
-let hintTimer = null;
-function showHint(text) {
-    saveHint.textContent = text;
-    saveHint.classList.add("is-visible");
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(function () {
-        saveHint.classList.remove("is-visible");
-    }, 1800);
-}
-
-promptInput.addEventListener("input", savePrompts);
-negativeInput.addEventListener("input", savePrompts);
-
-clearBtn.addEventListener("click", function () {
-    if (!promptInput.value && !negativeInput.value) return;
-    if (!confirm("ล้าง Prompt ทั้งหมดใช่ไหม?")) return;
-
-    promptInput.value = "";
-    negativeInput.value = "";
-    localStorage.removeItem(STORAGE_KEY);
-    showHint("ล้างแล้ว");
-    promptInput.focus();
-});
-
-loadPrompts();
-
 
 /* ============================================================
-   2) สร้างภาพ + ยกเลิก
+   3. ไฟล์อัปโหลด
    ============================================================ */
-genForm.addEventListener("submit", async function (event) {
-    event.preventDefault();
+function setFile(file) {
+    if (!file) return;
+    const cfg = TAB_CONFIG[currentTab];
+    if (!cfg.accept.includes(file.type)) return showHint(t("hint.badType"));
+    if (file.size > cfg.maxMB * 1024 * 1024) return showHint(t("hint.tooLarge", { n: cfg.maxMB }));
 
-    const prompt = promptInput.value.trim();
-    if (!prompt) {
-        showError("กรุณาใส่ Prompt ก่อนกด Generate");
-        promptInput.focus();
-        return;
+    clearFile();
+    currentFile = file;
+    previewURL = URL.createObjectURL(file);
+    $("thumb").src = previewURL;
+    $("fileName").textContent = file.name;
+    $("fileSize").textContent = (file.size / 1048576).toFixed(2) + " MB";
+    $("dropZone").hidden = true;
+    $("filePreview").hidden = false;
+    showHint(L(cfg.hint), true);
+}
+
+function clearFile() {
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    previewURL = null; currentFile = null;
+    $("fileInput").value = "";
+    $("dropZone").hidden = false;
+    $("filePreview").hidden = true;
+}
+
+/* ============================================================
+   4. ผลลัพธ์ / ดาวน์โหลด / เทียบก่อน-หลัง
+   ============================================================ */
+function clearResult() {
+    if (resultURL) URL.revokeObjectURL(resultURL);
+    resultURL = beforeURL = null;
+    $("compareWrap").hidden = true;
+    $("soloImage").hidden = true;
+    $("resultEmpty").hidden = false;
+    $("compareToggleWrap").hidden = true;
+    $("btnDownload").disabled = true;
+    $("resultImage").style.filter = "";
+}
+
+function showResult(url, beforeSrc) {
+    resultURL = url; beforeURL = beforeSrc || null;
+    $("resultEmpty").hidden = true;
+    $("resultImage").src = url;
+    $("soloImage").src = url;
+    $("btnDownload").disabled = false;
+
+    const canCompare = !!beforeSrc;
+    $("compareToggleWrap").hidden = !canCompare;
+    if (canCompare) $("beforeImage").src = beforeSrc;
+    paintCompare();
+}
+
+function paintCompare() {
+    const on = !$("compareToggleWrap").hidden && $("compareToggle").checked;
+    $("compareWrap").hidden = !on;
+    $("soloImage").hidden = on;
+    if (on) $("afterClip").style.clipPath = `inset(0 0 0 ${$("compareRange").value}%)`;
+}
+
+$("compareToggle").onchange = paintCompare;
+$("compareRange").oninput = paintCompare;
+
+$("btnDownload").onclick = () => {
+    if (!resultURL) return;
+    const ext = TAB_CONFIG[currentTab].returns === "image/jpeg" ? "jpg" : "png";
+    const a = document.createElement("a");
+    a.href = resultURL;
+    a.download = `${currentTab}-${Date.now()}.${ext}`;
+    a.click();
+};
+
+/* ============================================================
+   5. Validate + Submit
+   ============================================================ */
+function showHint(msg, info = false) {
+    const el = $("hint");
+    el.textContent = msg || "";
+    el.classList.toggle("info", info);
+}
+
+function validate() {
+    const cfg = TAB_CONFIG[currentTab];
+    if (cfg.usesPrompt && !$("promptInput").value.trim()) {
+        showHint(t("hint.needPrompt")); $("promptInput").focus(); return false;
     }
+    if (cfg.needsFile && !currentFile) { showHint(t("hint.needFile")); return false; }
+    return true;
+}
 
-    hideError();
+function setBusy(on) {
+    $("submitBtn").disabled = on;
+    $("spinner").hidden = !on;
+    if (on) { $("resultEmpty").hidden = true; $("soloImage").hidden = true; $("compareWrap").hidden = true; }
+}
+
+$("genForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    const cfg = TAB_CONFIG[currentTab];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
     setBusy(true);
-    controller = new AbortController();
-
+    clearResult();
+    setBusy(true);
     try {
-        const url = await generateImage(prompt, negativeInput.value.trim(), controller.signal);
-        showImage(url);
-
+        const url = USE_MOCK
+            ? await mockRequest(cfg)
+            : await realRequest(cfg, controller.signal);
+        showResult(url, cfg.needsFile ? previewURL : null);
+        if (USE_MOCK) showHint(t("hint.mock"), true);
+        else showHint("");
     } catch (err) {
-        resetOutput();
-        if (err.name === "AbortError") {
-            showError("ยกเลิกการสร้างภาพแล้ว");
-        } else {
-            showError("สร้างภาพไม่สำเร็จ: " + err.message);
-        }
-
+        if (err.name === "AbortError") showHint(t("hint.abort"));
+        else showHint(t("hint.error", { msg: err.message }));
+        $("resultEmpty").hidden = false;
     } finally {
+        clearTimeout(timer);
         setBusy(false);
-        controller = null;
     }
 });
 
-/* --- ปุ่มยกเลิก --- */
-cancelBtn.addEventListener("click", function () {
-    if (controller) controller.abort();
-});
-
-/* --- กด Esc = ยกเลิก / Ctrl+Enter = สร้าง --- */
-document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && controller) {
-        controller.abort();
-    }
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !controller) {
-        genForm.requestSubmit();
-    }
-});
-
-/* --- เตือนก่อนปิดหน้าขณะกำลังสร้าง --- */
-window.addEventListener("beforeunload", function (event) {
-    if (controller) {
-        event.preventDefault();
-        event.returnValue = "";
-    }
-});
-
-
-/* ============================================================
-   3) ฟังก์ชันสร้างภาพ (โหมดจำลอง — รองรับการยกเลิก)
-   ============================================================ */
-function generateImage(prompt, negative, signal) {
-    return new Promise(function (resolve, reject) {
-        if (signal.aborted) return reject(makeAbortError());
-
-        const timer = setTimeout(function () {
-            cleanup();
-            const seed = encodeURIComponent(prompt).slice(0, 20);
-            resolve("https://picsum.photos/seed/" + seed + "/800/1200");
-        }, 5000);
-
-        function onAbort() {
-            clearTimeout(timer);
-            cleanup();
-            reject(makeAbortError());
-        }
-        function cleanup() {
-            signal.removeEventListener("abort", onAbort);
-        }
-        signal.addEventListener("abort", onAbort);
-    });
-}
-
-function makeAbortError() {
-    const err = new Error("ผู้ใช้ยกเลิก");
-    err.name = "AbortError";
-    return err;
-}
-
-/* ------------------------------------------------------------
-    เมื่อได้ API จริงแล้ว ให้ลบฟังก์ชันด้านบน แล้วใช้อันนี้แทน
-   (โค้ดส่วนอื่นไม่ต้องแก้เลย — ปุ่มยกเลิกทำงานได้ทันที)
-
-const API_URL = "http://127.0.0.1:7860/generate";
-
-async function generateImage(prompt, negative, signal) {
-    const res = await fetch(API_URL, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ prompt: prompt, negative_prompt: negative }),
-        signal:  signal
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    return data.image_url;
-}
------------------------------------------------------------- */
-
-
-/* ============================================================
-   4) จัดการสถานะหน้าจอ
-   ============================================================ */
-function setBusy(isBusy) {
-    loading.hidden = !isBusy;
-    generateBtn.hidden = isBusy;
-    cancelBtn.hidden = !isBusy;
-
-    if (isBusy) {
-        placeholder.hidden = true;
-        resultImage.hidden = true;
-        setDownloadEnabled(false);
-    }
-}
-
-function showImage(url) {
-    currentImageUrl = url;
-    resultImage.src = url;
-    resultImage.hidden = false;
-    placeholder.hidden = true;
-    setDownloadEnabled(true);
-}
-
-function resetOutput() {
-    currentImageUrl = null;
-    resultImage.src = "";
-    resultImage.hidden = true;
-    placeholder.hidden = false;
-    setDownloadEnabled(false);
-}
-
-function setDownloadEnabled(enabled) {
-    downloadBtn.disabled = !enabled;
-    downloadBtn.classList.toggle("is-disabled", !enabled);
-}
-
-function showError(text) {
-    errorMsg.textContent = text;
-    errorMsg.hidden = false;
-}
-
-function hideError() {
-    errorMsg.textContent = "";
-    errorMsg.hidden = true;
-}
-
-
-/* ============================================================
-   5) ดาวน์โหลดภาพ
-   ============================================================ */
-downloadBtn.addEventListener("click", async function () {
-    if (!currentImageUrl) return;
-
-    const fileName = "genimage-" + Date.now() + ".png";
-
-    try {
-        const response = await fetch(currentImageUrl);
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        triggerDownload(blobUrl, fileName);
-        URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-        console.warn("fetch ไม่ผ่าน ใช้วิธีสำรองแทน:", err);
-        triggerDownload(currentImageUrl, fileName);
-    }
-});
-
-function triggerDownload(url, fileName) {
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
-
-/* ============================================================
-   6) แท็บ + Modal ดูภาพขยาย
-   ============================================================ */
-document.querySelectorAll(".tab").forEach(function (tab) {
-    tab.addEventListener("click", function () {
-        document.querySelectorAll(".tab").forEach(function (t) {
-            t.classList.remove("is-active");
+/* ---------- ยิงจริง ---------- */
+async function realRequest(cfg, signal) {
+    let res;
+    if (cfg.type === "text2img") {
+        const [w, h] = (optionState.size || "1024x1024").split("x").map(Number);
+        res = await fetch(API_BASE + cfg.endpoint, {
+            method: "POST", signal,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                prompt: $("promptInput").value.trim(),
+                negative_prompt: $("negativeInput").value.trim(),
+                width: w, height: h, steps: optionState.steps,
+            }),
         });
-        tab.classList.add("is-active");
+    } else {
+        const fd = new FormData();
+        fd.append("image", currentFile);
+        Object.entries(optionState).forEach(([k, v]) => fd.append(k, String(v)));
+        res = await fetch(API_BASE + cfg.endpoint, { method: "POST", body: fd, signal });
+    }
+
+    if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { msg = (await res.json())?.error?.message || msg; } catch { }
+        throw new Error(msg);
+    }
+    return URL.createObjectURL(await res.blob());
+}
+
+/* ---------- Mock ---------- */
+async function mockRequest(cfg) {
+    await new Promise((r) => setTimeout(r, 1200));
+    if (cfg.type === "text2img") {
+        const [w, h] = (optionState.size || "1024x1024").split("x");
+        return `https://placehold.co/${w}x${h}/1f2937/94a3b8?text=MOCK+GenImage`;
+    }
+    const filters = {
+        back: "contrast(1.12) drop-shadow(0 0 1px #000)",
+        icon: "saturate(1.06) blur(.3px)",
+        tone: {
+            warm: "sepia(.4) saturate(1.3)", cool: "hue-rotate(190deg) saturate(1.1)",
+            pastel: "saturate(.7) brightness(1.08)", mono: "grayscale(1)",
+            vivid: "saturate(1.6) contrast(1.1)", cinematic: "contrast(1.25) sepia(.2)"
+        }[optionState.tone],
+    };
+    $("resultImage").style.filter = $("soloImage").style.filter = filters[currentTab] || "none";
+    return previewURL;
+}
+
+/* ============================================================
+   6. ล็อกอิน / บัญชี  (mock — เก็บใน localStorage)
+   ============================================================ */
+const users = () => JSON.parse(localStorage.getItem(STORE + "users") || "[]");
+const saveUsers = (u) => localStorage.setItem(STORE + "users", JSON.stringify(u));
+const hash = (s) => { let h = 5381; for (const c of s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return h.toString(16); };
+
+function openAuth(mode = "login") {
+    authMode = mode;
+    $("authTitle").textContent = t(mode === "login" ? "auth.title" : "auth.titleReg");
+    $("authSubmit").textContent = t(mode === "login" ? "auth.login" : "auth.register");
+    $("authSwitch").textContent = t(mode === "login" ? "auth.toReg" : "auth.toLogin");
+    $("nameField").hidden = mode === "login";
+    $("authErr").textContent = "";
+    $("authModal").hidden = false;
+    $("authEmail").focus();
+}
+
+$("authSwitch").onclick = () => openAuth(authMode === "login" ? "register" : "login");
+$("authGuest").onclick = () => { $("authModal").hidden = true; };
+
+$("authForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = $("authName").value.trim();
+    const email = $("authEmail").value.trim().toLowerCase();
+    const pass = $("authPass").value;
+    const err = (k) => ($("authErr").textContent = t(k));
+
+    if (!email || !pass || (authMode === "register" && !name)) return err("auth.errFields");
+    if (!/^\S+@\S+\.\S+$/.test(email)) return err("auth.errEmail");
+    if (pass.length < 6) return err("auth.errShort");
+
+    const list = users();
+    const found = list.find((u) => u.email === email);
+
+    if (authMode === "register") {
+        if (found) return err("auth.errExists");
+        list.push({ name, email, pw: hash(pass) });
+        saveUsers(list);
+        login({ name, email });
+    } else {
+        if (!found) return err("auth.errNoUser");
+        if (found.pw !== hash(pass)) return err("auth.errPass");
+        login({ name: found.name, email: found.email });
+    }
+});
+
+function login(u) {
+    user = u;
+    localStorage.setItem(STORE + "session", JSON.stringify(u));
+    $("authModal").hidden = true;
+    $("authForm").reset();
+    loadTabPrefs();
+    loadNotes();
+    applyI18n();
+    showHint(t("auth.welcome", { name: u.name }), true);
+}
+
+function logout() {
+    user = null;
+    localStorage.removeItem(STORE + "session");
+    loadTabPrefs();
+    loadNotes();
+    applyI18n();
+}
+
+/* ============================================================
+   7. ตั้งค่า — ภาษา + โน้ต
+   ============================================================ */
+let noteTimer;
+function loadNotes() { $("notesInput").value = localStorage.getItem(uKey("notes")) || ""; }
+
+$("notesInput").addEventListener("input", () => {
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => {
+        localStorage.setItem(uKey("notes"), $("notesInput").value);
+        $("notesStatus").textContent = `✓ ${t("settings.saved")} · ${new Date().toLocaleTimeString()}`;
+    }, 500);
+});
+
+$("langSelect").addEventListener("change", (e) => {
+    lang = e.target.value;
+    localStorage.setItem(STORE + "lang", lang);
+    applyI18n();
+});
+
+$("btnReset").onclick = () => {
+    Object.keys(localStorage).filter((k) => k.startsWith(STORE)).forEach((k) => localStorage.removeItem(k));
+    user = null; lang = "th";
+    loadTabPrefs(); loadNotes(); applyI18n();
+    $("notesStatus").textContent = t("settings.resetOk");
+};
+
+/* ============================================================
+   8. เมนู / Modal / URL
+   ============================================================ */
+const openModal = (id) => ($(id).hidden = false);
+document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => (b.closest(".modal").hidden = true)));
+document.querySelectorAll(".modal").forEach((m) =>
+    (m.onclick = (e) => { if (e.target === m) m.hidden = true; }));
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") document.querySelectorAll(".modal").forEach((m) => (m.hidden = true));
+});
+
+$("btnMenu").onclick = (e) => { e.stopPropagation(); $("menuPop").hidden = !$("menuPop").hidden; };
+$("btnAccount").onclick = (e) => { e.stopPropagation(); user ? ($("menuPop").hidden = !$("menuPop").hidden) : openAuth("login"); };
+document.addEventListener("click", () => ($("menuPop").hidden = true));
+$("menuPop").onclick = (e) => e.stopPropagation();
+
+$("menuPop").querySelectorAll(".pop-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+        $("menuPop").hidden = true;
+        const act = btn.dataset.act;
+        if (act === "settings") { $("langSelect").value = lang; loadNotes(); openModal("settingsModal"); }
+        if (act === "tabs") { renderTabManager(); openModal("tabsModal"); }
+        if (act === "auth") user ? logout() : openAuth("login");
     });
 });
 
-resultImage.addEventListener("click", function () {
-    if (!currentImageUrl) return;
-    modalImage.src = currentImageUrl;
-    modal.classList.add("is-open");
-});
+$("btnTabs").onclick = () => { renderTabManager(); openModal("tabsModal"); };
 
-modalClose.addEventListener("click", closeModal);
-modal.addEventListener("click", function (event) {
-    if (event.target === modal) closeModal();
-});
-
-function closeModal() {
-    modal.classList.remove("is-open");
-    modalImage.src = "";
+function syncURL() {
+    const cfg = TAB_CONFIG[currentTab];
+    const p = new URLSearchParams();
+    if (cfg.usesPrompt) {
+        const pr = $("promptInput").value.trim(), ng = $("negativeInput").value.trim();
+        if (pr) p.set("prompt", pr);
+        if (ng) p.set("negativePrompt", ng);
+    }
+    const qs = p.toString();
+    history.replaceState(null, "", `${location.pathname}${qs ? "?" + qs : ""}#${currentTab}`);
 }
+
+/* ---------- Uploader events ---------- */
+const dz = $("dropZone");
+if (dz) {
+    dz.onclick = () => $("fileInput").click();
+    dz.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); } };
+    ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("dragover"); }));
+    ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("dragover"); }));
+    dz.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
+}
+$("fileInput").onchange = (e) => setFile(e.target.files[0]);
+$("clearFile").onclick = () => { clearFile(); clearResult(); };
+$("clearPrompt").onclick = () => { $("promptInput").value = ""; $("negativeInput").value = ""; syncURL(); };
+[$("promptInput"), $("negativeInput")].forEach((el) => el.addEventListener("input", syncURL));
+
+/* ============================================================
+   9. Init
+   ============================================================ */
+(function init() {
+    $("mockBadge").hidden = !USE_MOCK;
+    loadTabPrefs();
+    loadNotes();
+
+    const q = new URLSearchParams(location.search);
+    const hashTab = location.hash.replace("#", "");
+    const start = visibleTabs().includes(hashTab) ? hashTab : visibleTabs()[0];
+
+    applyI18n();
+    switchTab(start);
+
+    if (TAB_CONFIG[start].usesPrompt) {
+        $("promptInput").value = q.get("prompt") || "";
+        $("negativeInput").value = q.get("negativePrompt") || "";
+    }
+    $("langSelect").value = lang;
+})();

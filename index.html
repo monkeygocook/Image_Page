@@ -3,116 +3,147 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Image Studio</title>
     <link rel="stylesheet" href="css/style.css">
-    <title>AI Image Generator</title>
 </head>
 
 <body>
 
-    <div class="app">
+    <div id="mockBadge" class="mock-badge" hidden></div>
 
-        <!-- ========== แถบบน: เมนูฟังก์ชัน + บัญชี + ตั้งค่า ========== -->
-        <header class="app-header">
+    <header class="topbar">
+        <nav class="tabbar" id="tabBar"></nav>
+        <button id="btnTabs" class="icon-btn" title="จัดการแท็บ">✏️</button>
+        <div class="spacer"></div>
+        <button id="btnAccount" class="avatar-btn" title="บัญชี"><span id="avatarText">?</span></button>
+        <button id="btnMenu" class="icon-btn" title="เมนู">☰</button>
 
-            <nav class="tabs">
-                <button class="tab is-active" data-tab="genimage">GenImage</button>
-                <button class="tab" data-tab="back">Back</button>
-                <button class="tab" data-tab="icon">Icon</button>
-                <button class="tab" data-tab="tone">Tone</button>
+        <div id="menuPop" class="popover" hidden>
+            <div class="pop-user"><strong id="popName">—</strong><small id="popMail"></small></div>
+            <button class="pop-item" data-act="settings"><span>⚙️</span><span data-i18n="nav.settings"></span></button>
+            <button class="pop-item" data-act="tabs"><span>✏️</span><span data-i18n="nav.tabs"></span></button>
+            <hr>
+            <button class="pop-item" data-act="auth"><span>👤</span><span id="popAuthLabel"></span></button>
+        </div>
+    </header>
 
-                <!-- ปุ่มดินสอ (ยังไม่ใช้งานตอนนี้) -->
-                <button class="icon-btn" id="editBtn" title="แก้ไข" aria-label="แก้ไข">
-                    <svg viewBox="0 0 24 24">
-                        <path
-                            d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
-                    </svg>
-                </button>
-            </nav>
+    <main class="layout">
+        <form id="genForm" class="panel" novalidate>
 
-            <div class="header-right"> <!-- ปุ่มบัญชี + ปุ่มเมนู -->
-                <button class="avatar-btn" id="accountBtn" title="ล็อกอิน / บัญชี" aria-label="บัญชี">
-                    <svg viewBox="0 0 24 24">
-                        <path
-                            d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5z" />
-                    </svg>
-                </button>
-                <button class="menu-btn" id="menuBtn" title="ตั้งค่าเพิ่มเติม" aria-label="เมนู"> <!-- ปุ่มเมนู -->
-                    <span></span><span></span><span></span>
-                </button>
-            </div>
-
-        </header>
-
-        <!-- ========== เนื้อหา: ซ้าย = อินพุต / ขวา = ผลลัพธ์ ========== -->
-        <main class="app-body">
-
-            <!-- ---------- ฝั่งซ้าย ---------- -->
-            <section class="panel-input"> <!-- อินพุต Prompt -->
-                <form id="genForm">
-
-                    <div class="prompt-toolbar">
-                        <span class="save-hint" id="saveHint"></span>
-                        <button type="button" class="btn-text" id="clearBtn">ล้าง Prompt</button>
-                    </div>
-
-                    <label for="promptInput" class="sr-only">Prompt</label>
-                    <textarea id="promptInput" name="prompt" class="prompt-input" rows="5"
-                        placeholder="Prompt&#10;(Describe the image you want...)"></textarea>
-                    <label for="negativeInput" class="sr-only">Negative Prompt</label>
-                    <textarea id="negativeInput" name="negativePrompt" class="prompt-input" rows="5"
-                        placeholder="Negative Prompt&#10;(Describe what you don't want...)"></textarea>
-
-                    <p class="error-msg" id="errorMsg" hidden></p>
-
-                    <div class="action-row">
-                        <button type="submit" class="btn-generate" id="generateBtn">Generate</button>
-                        <button type="button" class="btn-cancel" id="cancelBtn" hidden>ยกเลิก</button>
-                    </div>
-
-                </form>
+            <section id="promptGroup" class="group">
+                <button type="button" id="clearPrompt" class="link-btn" data-i18n="prompt.clear"></button>
+                <textarea id="promptInput" rows="4" data-i18n-ph="prompt.ph"></textarea>
+                <textarea id="negativeInput" rows="4" data-i18n-ph="negative.ph"></textarea>
             </section>
 
-            <!-- ---------- ฝั่งขวา ---------- -->
-            <section class="panel-output"> <!-- แสดงผลลัพธ์รูปที่สร้าง -->
-
-                <div class="image-box" id="imageBox">
-
-                    <!-- สถานะ 1: ยังไม่มีรูป -->
-                    <div class="placeholder" id="placeholder">
-                        <svg viewBox="0 0 24 24">
-                            <path
-                                d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
-                        </svg>
-                    </div>
-
-                    <!-- สถานะ 2: กำลังสร้าง -->
-                    <div class="loading" id="loading" hidden>
-                        <div class="spinner"></div>
-                        <span>กำลังสร้างภาพ...</span>
-                    </div>
-
-                    <!-- สถานะ 3: ได้รูปแล้ว -->
-                    <img id="resultImage" class="result-image" alt="ภาพที่สร้างจาก AI" hidden>
-
+            <section id="uploaderGroup" class="group">
+                <div id="dropZone" class="dropzone" tabindex="0" role="button">
+                    <div class="dz-icon">🖼️</div>
+                    <p><span data-i18n="upload.cta"></span> <u data-i18n="upload.click"></u></p>
+                    <small id="dzHint"></small>
                 </div>
-
-                <!-- ปุ่มดาวน์โหลด -->
-                <button class="download-btn is-disabled" id="downloadBtn" disabled title="ดาวน์โหลดภาพ">
-                    <img src="image/Downloads_29996.png" alt="ดาวน์โหลด">
-                </button>
-
+                <div id="filePreview" class="file-preview" hidden>
+                    <img id="thumb" alt="">
+                    <div class="fp-meta"><strong id="fileName"></strong><small id="fileSize"></small></div>
+                    <button type="button" id="clearFile" class="link-btn danger" data-i18n="upload.remove"></button>
+                </div>
+                <input type="file" id="fileInput" hidden>
             </section>
 
-        </main>
+            <section id="optionsGroup" class="group options"></section>
+
+            <p id="hint" class="hint"></p>
+            <button type="submit" id="submitBtn" class="cta">—</button>
+        </form>
+
+        <aside class="panel result">
+            <div id="resultStage" class="stage">
+                <p id="resultEmpty" class="stage-empty" data-i18n="result.empty"></p>
+                <div id="spinner" class="spinner" hidden></div>
+                <div id="compareWrap" class="compare" hidden>
+                    <img id="beforeImage" alt="before">
+                    <div id="afterClip" class="clip"><img id="resultImage" alt="result"></div>
+                    <input type="range" id="compareRange" min="0" max="100" value="50">
+                    <span class="cmp-tag left" data-i18n="result.before"></span>
+                    <span class="cmp-tag right" data-i18n="result.after"></span>
+                </div>
+                <img id="soloImage" class="solo" alt="result" hidden>
+            </div>
+            <div class="stage-actions">
+                <label id="compareToggleWrap" class="chk" hidden>
+                    <input type="checkbox" id="compareToggle" checked>
+                    <span data-i18n="result.compare"></span>
+                </label>
+                <button id="btnDownload" class="ghost" disabled>⬇ <span data-i18n="result.download"></span></button>
+            </div>
+        </aside>
+    </main>
+
+    <!-- ===== Modal: จัดการแท็บ ===== -->
+    <div id="tabsModal" class="modal" hidden>
+        <div class="modal-box">
+            <h3 data-i18n="tabs.title"></h3>
+            <p class="muted" data-i18n="tabs.desc"></p>
+            <ul id="tabsList" class="tabs-list"></ul>
+            <p id="tabsWarn" class="hint" hidden data-i18n="tabs.min"></p>
+            <div class="modal-actions">
+                <button class="ghost" data-close data-i18n="common.close"></button>
+            </div>
+        </div>
     </div>
 
-    <!-- ========== Modal ดูรูปขนาดใหญ่ ========== -->
-    <div class="modal" id="modal">
-        <span class="modal-close" id="modalClose">&times;</span>
-        <img class="modal-image" id="modalImage" alt="ภาพขยาย">
+    <!-- ===== Drawer: ตั้งค่า ===== -->
+    <div id="settingsModal" class="modal" hidden>
+        <div class="modal-box">
+            <h3 data-i18n="settings.title"></h3>
+            <label class="field">
+                <span data-i18n="settings.lang"></span>
+                <select id="langSelect">
+                    <option value="th">ไทย</option>
+                    <option value="en">English</option>
+                </select>
+            </label>
+            <label class="field">
+                <span data-i18n="settings.notes"></span>
+                <textarea id="notesInput" rows="7" data-i18n-ph="settings.notesPh"></textarea>
+            </label>
+            <small id="notesStatus" class="muted"></small>
+            <div class="modal-actions">
+                <button id="btnReset" class="ghost danger" data-i18n="settings.reset"></button>
+                <button class="ghost" data-close data-i18n="common.close"></button>
+            </div>
+        </div>
     </div>
 
+    <!-- ===== Modal: ล็อกอิน ===== -->
+    <div id="authModal" class="modal" hidden>
+        <div class="modal-box narrow">
+            <h3 id="authTitle"></h3>
+            <form id="authForm">
+                <label class="field" id="nameField" hidden>
+                    <span data-i18n="auth.name"></span>
+                    <input type="text" id="authName" autocomplete="name">
+                </label>
+                <label class="field">
+                    <span data-i18n="auth.email"></span>
+                    <input type="email" id="authEmail" autocomplete="email">
+                </label>
+                <label class="field">
+                    <span data-i18n="auth.pass"></span>
+                    <input type="password" id="authPass" autocomplete="current-password">
+                </label>
+                <p id="authErr" class="hint"></p>
+                <button type="submit" class="cta" id="authSubmit"></button>
+            </form>
+            <button id="authSwitch" class="link-btn center"></button>
+            <button id="authGuest" class="link-btn center muted" data-i18n="auth.guest"></button>
+            <small class="muted center" data-i18n="auth.mockNote"></small>
+            <button class="modal-x" data-close>✕</button>
+        </div>
+    </div>
+
+    <script src="js/config.js" defer></script>
     <script src="js/script.js" defer></script>
 </body>
 
