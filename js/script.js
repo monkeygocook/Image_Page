@@ -2,7 +2,35 @@
    script.js — ทั้งหมดของหน้าบ้าน
    ============================================================ */
 const $ = (id) => document.getElementById(id);
+resultImage
+/* ============================================================
+   0. Blob Registry — 1 URL มีเจ้าของเดียว กัน leak + กัน double-revoke
+   slot ที่ใช้: "preview" | "result" | "before"
+   ============================================================ */
+const Blobs = (() => {
+    const slots = new Map();
+    const isBlob = (u) => typeof u === "string" && u.startsWith("blob:");
+    const sharedWith = (url, except) => [...slots].some(([k, v]) => k !== except && v === url);
 
+    const api = {
+        set(slot, url) {
+            const old = slots.get(slot);
+            // revoke เฉพาะเมื่อ: เป็น blob จริง + ไม่มี slot อื่นใช้อยู่
+            if (old && old !== url && isBlob(old) && !sharedWith(old, slot)) URL.revokeObjectURL(old);
+            url ? slots.set(slot, url) : slots.delete(slot);
+            return url ?? null;
+        },
+        get: (slot) => slots.get(slot) ?? null,
+        clear: (slot) => api.set(slot, null),
+        clearAll: () => [...slots.keys()].forEach((k) => api.clear(k)),
+        fromFile: (slot, file) => api.set(slot, URL.createObjectURL(file)),
+        debug: () => Object.fromEntries(slots),
+    };
+    return api;
+})();
+
+window.addEventListener("pagehide", () => Blobs.clearAll());
+window.__blobs = Blobs.debug;   // เปิด console พิมพ์ __blobs() ดูได้ว่าค้างกี่ตัว
 /* ---------- State ---------- */
 let lang = localStorage.getItem(STORE + "lang") || "th";
 let user = JSON.parse(localStorage.getItem(STORE + "session") || "null");
@@ -120,12 +148,15 @@ function switchTab(name, keepResult = false) {
     syncURL();
 }
 
-function renderOptions(cfg) {
+function renderOptions(cfg, preserve = false) {
+    const prev = preserve ? { ...optionState } : {};
     const box = $("optionsGroup");
     box.innerHTML = "";
     optionState = {};
+
     Object.entries(cfg.fields || {}).forEach(([key, f]) => {
-        optionState[key] = f.default;
+        const start = prev[key] !== undefined ? prev[key] : f.default;   // 👈 คงค่าเดิม
+        optionState[key] = start;
         const wrap = document.createElement("div");
         wrap.className = "opt";
 
@@ -135,7 +166,7 @@ function renderOptions(cfg) {
             f.values.forEach((v) => {
                 const c = document.createElement("button");
                 c.type = "button";
-                c.className = "chip" + (v.v === f.default ? " on" : "");
+                c.className = "chip" + (v.v === start ? " on" : "");
                 c.textContent = v[lang];
                 c.onclick = () => {
                     optionState[key] = v.v;
@@ -145,14 +176,14 @@ function renderOptions(cfg) {
                 chips.appendChild(c);
             });
         } else if (f.kind === "bool") {
-            wrap.innerHTML = `<label class="chk"><input type="checkbox" ${f.default ? "checked" : ""}>
+            wrap.innerHTML = `<label class="chk"><input type="checkbox" ${start ? "checked" : ""}>
         <span>${L(f.label)}</span></label>`;
             wrap.querySelector("input").onchange = (e) => (optionState[key] = e.target.checked);
         } else if (f.kind === "range") {
             wrap.innerHTML = `<span class="opt-label">${L(f.label)}</span>
         <div class="range-row">
-          <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${f.default}">
-          <span class="range-val">${f.default}${f.suffix || ""}</span>
+          <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${start}">
+          <span class="range-val">${start}${f.suffix || ""}</span>
         </div>`;
             const [inp, out] = [wrap.querySelector("input"), wrap.querySelector(".range-val")];
             inp.oninput = () => { optionState[key] = +inp.value; out.textContent = inp.value + (f.suffix || ""); };
@@ -167,13 +198,12 @@ function renderOptions(cfg) {
 function setFile(file) {
     if (!file) return;
     const cfg = TAB_CONFIG[currentTab];
-    if (!cfg.accept.includes(file.type)) return showHint(t("hint.badType"));
+    if (!cfg.accept?.includes(file.type)) return showHint(t("hint.badType"));
     if (file.size > cfg.maxMB * 1024 * 1024) return showHint(t("hint.tooLarge", { n: cfg.maxMB }));
 
-    clearFile();
+    clearResult();                                   // 👈 #8 ผลลัพธ์เก่าไม่ผูกกับไฟล์ใหม่
     currentFile = file;
-    previewURL = URL.createObjectURL(file);
-    $("thumb").src = previewURL;
+    $("thumb").src = Blobs.fromFile("preview", file); // 👈 #1 registry ดูแล revoke ให้เอง
     $("fileName").textContent = file.name;
     $("fileSize").textContent = (file.size / 1048576).toFixed(2) + " MB";
     $("dropZone").hidden = true;
@@ -182,11 +212,10 @@ function setFile(file) {
 }
 
 function clearFile() {
-    if (previewURL && previewURL !== resultURL) URL.revokeObjectURL(previewURL);
-    previewURL = null;
     currentFile = null;
     $("fileInput").value = "";
-    $("thumb").removeAttribute("src");     // 👈 เพิ่ม
+    $("thumb").removeAttribute("src");   // 👈 #3 ล้าง src ก่อน revoke เสมอ
+    Blobs.clear("preview");              //     ถ้า result ยังใช้ URL นี้ → registry จะไม่ revoke
     $("dropZone").hidden = false;
     $("filePreview").hidden = true;
 }
@@ -195,10 +224,11 @@ function clearFile() {
 /* ============================================================
    4. ผลลัพธ์ / ดาวน์โหลด / เทียบก่อน-หลัง
    ============================================================ */
+
 function clearResult() {
-    if (resultURL?.startsWith("blob:") && resultURL !== previewURL) URL.revokeObjectURL(resultURL);
-    resultURL = beforeURL = null;
     ["resultImage", "soloImage", "beforeImage"].forEach((id) => $(id).removeAttribute("src"));
+    Blobs.clear("result");
+    Blobs.clear("before");
     $("compareWrap").hidden = true;
     $("soloImage").hidden = true;
     $("resultEmpty").hidden = false;
@@ -208,7 +238,8 @@ function clearResult() {
 }
 
 function showResult(url, beforeSrc) {
-    resultURL = url; beforeURL = beforeSrc || null;
+    Blobs.set("result", url);
+    Blobs.set("before", beforeSrc || null);
     $("resultEmpty").hidden = true;
     $("resultImage").src = url;
     $("soloImage").src = url;
@@ -230,15 +261,27 @@ function paintCompare() {
 $("compareToggle").onchange = paintCompare;
 $("compareRange").oninput = paintCompare;
 
-$("btnDownload").onclick = () => {
-    if (!resultURL) return;
+$("btnDownload").onclick = async () => {
+    const url = resultURL();
+    if (!url) return;
     const ext = TAB_CONFIG[currentTab].returns === "image/jpeg" ? "jpg" : "png";
-    const a = document.createElement("a");
-    a.href = resultURL;
-    a.download = `${currentTab}-${Date.now()}.${ext}`;
-    a.click();
-};
+    const name = `${currentTab}-${Date.now()}.${ext}`;
+    let href = url, temp = null;
 
+    try {
+        if (!url.startsWith("blob:")) {                      // remote → ดึงเป็น blob ก่อน
+            const blob = await (await fetch(url, { mode: "cors" })).blob();
+            href = temp = URL.createObjectURL(blob);
+        }
+        const a = document.createElement("a");
+        a.href = href; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+    } catch {
+        window.open(url, "_blank", "noopener");              // fallback
+    } finally {
+        if (temp) setTimeout(() => URL.revokeObjectURL(temp), 4000);
+    }
+};
 /* ============================================================
    5. Validate + Submit
    ============================================================ */
@@ -271,19 +314,14 @@ $("genForm").addEventListener("submit", async (e) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
-    setBusy(true);
     clearResult();
-    setBusy(true);
+    setBusy(true);                                  // 👈 เรียกครั้งเดียว หลัง clearResult
     try {
-        const url = USE_MOCK
-            ? await mockRequest(cfg)
-            : await realRequest(cfg, controller.signal);
-        showResult(url, cfg.needsFile ? previewURL : null);
-        if (USE_MOCK) showHint(t("hint.mock"), true);
-        else showHint("");
+        const url = USE_MOCK ? await mockRequest(cfg) : await realRequest(cfg, controller.signal);
+        showResult(url, cfg.needsFile ? previewURL() : null);
+        showHint(USE_MOCK ? t("hint.mock") : "", true);
     } catch (err) {
-        if (err.name === "AbortError") showHint(t("hint.abort"));
-        else showHint(t("hint.error", { msg: err.message }));
+        showHint(err.name === "AbortError" ? t("hint.abort") : t("hint.error", { msg: err.message }));
         $("resultEmpty").hidden = false;
     } finally {
         clearTimeout(timer);
@@ -337,9 +375,10 @@ async function mockRequest(cfg) {
         }[optionState.tone],
     };
     $("resultImage").style.filter = $("soloImage").style.filter = filters[currentTab] || "none";
-    return previewURL;
-}
+    return previewURL();          // 👈 เดิม return previewURL
 
+}
+renderOptions
 /* ============================================================
    6. ล็อกอิน / บัญชี  (mock — เก็บใน localStorage)
    ============================================================ */
@@ -508,3 +547,7 @@ $("clearPrompt").onclick = () => { $("promptInput").value = ""; $("negativeInput
     }
     $("langSelect").value = lang;
 })();
+
+__blobs()
+// ก่อนแก้ → {preview:'blob:...', result:'blob:...', ...} สะสมเรื่อย ๆ ใน Memory tab
+// หลังแก้ → {} ว่างเปล่าทุกครั้งหลัง Remove

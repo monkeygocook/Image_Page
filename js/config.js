@@ -2,8 +2,10 @@
    config.js — Single Source of Truth
    ทีมหลังบ้าน: อ่านไฟล์นี้ไฟล์เดียวพอ
    ============================================================ */
-
-const API_BASE = `http://${location.hostname}:7860`;
+/* ---------- ที่อยู่ API ---------- */
+const API_PORT = 7860;
+const API_BASE = new URLSearchParams(location.search).get("api")   // ?api=http://x.x.x.x:7860
+    || `${location.protocol}//${location.hostname}:${API_PORT}`;
 const USE_MOCK = true;              // ⚠️ เปลี่ยนเป็น false เมื่อหลังบ้านพร้อม
 const REQUEST_TIMEOUT = 120000;     // 2 นาที
 const STORE = "imgstudio:";         // prefix ของ localStorage
