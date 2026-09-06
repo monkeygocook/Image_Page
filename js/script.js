@@ -1,6 +1,6 @@
 /* ============================================================
    script.js — ทั้งหมดของหน้าบ้าน
-   อัปเดต: 2026-09-06 (แก้ previewURL/resultURL, ลบโค้ดขยะ, เพิ่ม API layer)
+   อัปเดต: 2026-09-06 (แก้นามสกุลไฟล์ดาวน์โหลดให้ตรงกับ MIME จริง)
    ============================================================ */
 const $ = (id) => document.getElementById(id);
 
@@ -229,6 +229,29 @@ function clearFile() {
 /* ============================================================
    4. ผลลัพธ์ / ดาวน์โหลด / เทียบก่อน-หลัง
    ============================================================ */
+
+/* ---------- ตารางแปลง MIME → นามสกุลไฟล์ ---------- */
+const MIME_EXT = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/avif": "avif",
+    "image/svg+xml": "svg",
+    "image/bmp": "bmp",
+};
+
+/**
+ * แปลง MIME type เป็นนามสกุลไฟล์
+ * @param {string} mime  เช่น "image/png" หรือ "image/svg+xml; charset=utf-8"
+ * @param {string} fallback  ใช้เมื่อไม่รู้จัก MIME นั้น
+ */
+function extFromMime(mime, fallback = "png") {
+    const clean = String(mime || "").split(";")[0].trim().toLowerCase();
+    return MIME_EXT[clean] || fallback;
+}
+
 function clearResult() {
     ["resultImage", "soloImage", "beforeImage"].forEach((id) => $(id).removeAttribute("src"));
     Blobs.clear("result");
@@ -268,20 +291,31 @@ $("compareRange").oninput = paintCompare;
 $("btnDownload").onclick = async () => {
     const url = resultURL();
     if (!url) return;
-    const ext = TAB_CONFIG[currentTab].returns === "image/jpeg" ? "jpg" : "png";
-    const name = `${currentTab}-${Date.now()}.${ext}`;
-    let href = url, temp = null;
+
+    // นามสกุลสำรอง = ตามสัญญาใน config (ใช้เมื่ออ่านของจริงไม่ได้)
+    const fallbackExt = extFromMime(TAB_CONFIG[currentTab].returns, "png");
+    let href = url, temp = null, ext = fallbackExt;
 
     try {
-        if (!url.startsWith("blob:")) {                      // remote → ดึงเป็น blob ก่อน
-            const blob = await (await fetch(url, { mode: "cors" })).blob();
-            href = temp = URL.createObjectURL(blob);
-        }
-        const a = document.createElement("a");
-        a.href = href; a.download = name;
-        document.body.appendChild(a); a.click(); a.remove();
+        // ดึงเป็น blob เสมอ (ทั้ง blob: และ remote) เพื่ออ่าน MIME ของจริง
+        const res = await fetch(url, url.startsWith("blob:") ? {} : { mode: "cors" });
+        const blob = await res.blob();
+        ext = extFromMime(blob.type, fallbackExt);   // ← ใช้ของจริง ไม่ใช่ของที่คาดหวัง
+        href = temp = URL.createObjectURL(blob);
     } catch {
-        window.open(url, "_blank", "noopener");              // fallback
+        // ดึงไม่ได้ (เช่นโดน CORS) → ใช้ URL เดิม + นามสกุลตามสัญญา
+    }
+
+    const name = `${currentTab}-${Date.now()}.${ext}`;
+    try {
+        const a = document.createElement("a");
+        a.href = href;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    } catch {
+        window.open(url, "_blank", "noopener");       // fallback สุดท้าย
     } finally {
         if (temp) setTimeout(() => URL.revokeObjectURL(temp), 4000);
     }
@@ -392,7 +426,8 @@ async function mockRequest(cfg) {
     await new Promise((r) => setTimeout(r, 1200));
     if (cfg.type === "text2img") {
         const [w, h] = (optionState.size || "1024x1024").split("x");
-        return `https://placehold.co/${w}x${h}/1f2937/94a3b8?text=MOCK+GenImage`;
+        // ".png" สำคัญมาก — ถ้าไม่ใส่ placehold.co จะส่ง SVG มาให้ (ค่าเริ่มต้นของบริการ)
+        return `https://placehold.co/${w}x${h}/1f2937/94a3b8.png?text=MOCK+GenImage`;
     }
     const filters = {
         back: "contrast(1.12) drop-shadow(0 0 1px #000)",
