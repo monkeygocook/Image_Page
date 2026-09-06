@@ -1,8 +1,9 @@
 /* ============================================================
    script.js — ทั้งหมดของหน้าบ้าน
+   อัปเดต: 2026-09-06 (แก้ previewURL/resultURL, ลบโค้ดขยะ, เพิ่ม API layer)
    ============================================================ */
 const $ = (id) => document.getElementById(id);
-resultImage
+
 /* ============================================================
    0. Blob Registry — 1 URL มีเจ้าของเดียว กัน leak + กัน double-revoke
    slot ที่ใช้: "preview" | "result" | "before"
@@ -31,17 +32,21 @@ const Blobs = (() => {
 
 window.addEventListener("pagehide", () => Blobs.clearAll());
 window.__blobs = Blobs.debug;   // เปิด console พิมพ์ __blobs() ดูได้ว่าค้างกี่ตัว
-/* ---------- State ---------- */
+
+/* ============================================================
+   State — ไม่มีตัวแปรเก็บ URL แล้ว ใช้ getter อ่านจาก Blobs อย่างเดียว
+   ============================================================ */
 let lang = localStorage.getItem(STORE + "lang") || "th";
 let user = JSON.parse(localStorage.getItem(STORE + "session") || "null");
 let currentTab = null;
 let currentFile = null;
-let previewURL = null;
-let resultURL = null;
-let beforeURL = null;
 let optionState = {};
 let tabPrefs = null;
 let authMode = "login";
+
+const previewURL = () => Blobs.get("preview");
+const resultURL = () => Blobs.get("result");
+const beforeURL = () => Blobs.get("before");
 
 /* ---------- i18n ---------- */
 const t = (k, vars = {}) =>
@@ -141,7 +146,8 @@ function switchTab(name, keepResult = false) {
     if (!cfg.needsFile) clearFile();
     $("dzHint").textContent = L(cfg.hint);
 
-    renderOptions(cfg);
+    // keepResult = true แปลว่าแค่รีเฟรชภาษา → ต้องคงค่าที่ผู้ใช้เลือกไว้
+    renderOptions(cfg, keepResult);
     $("submitBtn").textContent = L(cfg.cta);
     showHint(L(cfg.hint), true);
     if (!keepResult) clearResult();
@@ -155,7 +161,7 @@ function renderOptions(cfg, preserve = false) {
     optionState = {};
 
     Object.entries(cfg.fields || {}).forEach(([key, f]) => {
-        const start = prev[key] !== undefined ? prev[key] : f.default;   // 👈 คงค่าเดิม
+        const start = prev[key] !== undefined ? prev[key] : f.default;   // คงค่าเดิมถ้ามี
         optionState[key] = start;
         const wrap = document.createElement("div");
         wrap.className = "opt";
@@ -201,9 +207,9 @@ function setFile(file) {
     if (!cfg.accept?.includes(file.type)) return showHint(t("hint.badType"));
     if (file.size > cfg.maxMB * 1024 * 1024) return showHint(t("hint.tooLarge", { n: cfg.maxMB }));
 
-    clearResult();                                   // 👈 #8 ผลลัพธ์เก่าไม่ผูกกับไฟล์ใหม่
+    clearResult();                                    // ผลลัพธ์เก่าไม่ผูกกับไฟล์ใหม่
     currentFile = file;
-    $("thumb").src = Blobs.fromFile("preview", file); // 👈 #1 registry ดูแล revoke ให้เอง
+    $("thumb").src = Blobs.fromFile("preview", file); // registry ดูแล revoke ให้เอง
     $("fileName").textContent = file.name;
     $("fileSize").textContent = (file.size / 1048576).toFixed(2) + " MB";
     $("dropZone").hidden = true;
@@ -214,17 +220,15 @@ function setFile(file) {
 function clearFile() {
     currentFile = null;
     $("fileInput").value = "";
-    $("thumb").removeAttribute("src");   // 👈 #3 ล้าง src ก่อน revoke เสมอ
-    Blobs.clear("preview");              //     ถ้า result ยังใช้ URL นี้ → registry จะไม่ revoke
+    $("thumb").removeAttribute("src");   // ล้าง src ก่อน revoke เสมอ
+    Blobs.clear("preview");              // ถ้า result ยังใช้ URL นี้ → registry จะไม่ revoke
     $("dropZone").hidden = false;
     $("filePreview").hidden = true;
 }
 
-
 /* ============================================================
    4. ผลลัพธ์ / ดาวน์โหลด / เทียบก่อน-หลัง
    ============================================================ */
-
 function clearResult() {
     ["resultImage", "soloImage", "beforeImage"].forEach((id) => $(id).removeAttribute("src"));
     Blobs.clear("result");
@@ -282,6 +286,7 @@ $("btnDownload").onclick = async () => {
         if (temp) setTimeout(() => URL.revokeObjectURL(temp), 4000);
     }
 };
+
 /* ============================================================
    5. Validate + Submit
    ============================================================ */
@@ -315,7 +320,7 @@ $("genForm").addEventListener("submit", async (e) => {
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
     clearResult();
-    setBusy(true);                                  // 👈 เรียกครั้งเดียว หลัง clearResult
+    setBusy(true);                                  // เรียกครั้งเดียว หลัง clearResult
     try {
         const url = USE_MOCK ? await mockRequest(cfg) : await realRequest(cfg, controller.signal);
         showResult(url, cfg.needsFile ? previewURL() : null);
@@ -329,12 +334,42 @@ $("genForm").addEventListener("submit", async (e) => {
     }
 });
 
+/* ============================================================
+   5.5 API layer — ใส่ token อัตโนมัติ + จัดการ 401
+   ============================================================ */
+const Token = {
+    get: () => localStorage.getItem(STORE + "token"),
+    set: (v) => v
+        ? localStorage.setItem(STORE + "token", v)
+        : localStorage.removeItem(STORE + "token"),
+};
+
+async function apiFetch(path, { auth = true, ...opts } = {}) {
+    const headers = new Headers(opts.headers || {});
+    if (auth && Token.get()) headers.set("Authorization", `Bearer ${Token.get()}`);
+
+    const res = await fetch(API_BASE + path, { ...opts, headers });
+
+    if (res.status === 401) {          // token หมดอายุ → เด้งกลับหน้าล็อกอิน
+        Token.set(null);
+        logout();
+        openAuth("login");
+        throw new Error("UNAUTHORIZED");
+    }
+    if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { msg = (await res.json())?.error?.message || msg; } catch { }
+        throw new Error(msg);
+    }
+    return res;
+}
+
 /* ---------- ยิงจริง ---------- */
 async function realRequest(cfg, signal) {
     let res;
     if (cfg.type === "text2img") {
         const [w, h] = (optionState.size || "1024x1024").split("x").map(Number);
-        res = await fetch(API_BASE + cfg.endpoint, {
+        res = await apiFetch(cfg.endpoint, {
             method: "POST", signal,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -347,13 +382,7 @@ async function realRequest(cfg, signal) {
         const fd = new FormData();
         fd.append("image", currentFile);
         Object.entries(optionState).forEach(([k, v]) => fd.append(k, String(v)));
-        res = await fetch(API_BASE + cfg.endpoint, { method: "POST", body: fd, signal });
-    }
-
-    if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try { msg = (await res.json())?.error?.message || msg; } catch { }
-        throw new Error(msg);
+        res = await apiFetch(cfg.endpoint, { method: "POST", body: fd, signal });
     }
     return URL.createObjectURL(await res.blob());
 }
@@ -375,10 +404,9 @@ async function mockRequest(cfg) {
         }[optionState.tone],
     };
     $("resultImage").style.filter = $("soloImage").style.filter = filters[currentTab] || "none";
-    return previewURL();          // 👈 เดิม return previewURL
-
+    return previewURL();          // ใช้ URL เดียวกับ thumb — registry กันลบซ้ำให้แล้ว
 }
-renderOptions
+
 /* ============================================================
    6. ล็อกอิน / บัญชี  (mock — เก็บใน localStorage)
    ============================================================ */
@@ -426,11 +454,14 @@ $("authForm").addEventListener("submit", (e) => {
     }
 });
 
-function login(u) {
+function login(u, token = null) {
     user = u;
     localStorage.setItem(STORE + "session", JSON.stringify(u));
+    if (token) Token.set(token);          // โหมดจริง: เก็บ access_token จากหลังบ้าน
     $("authModal").hidden = true;
     $("authForm").reset();
+    clearFile();                          // ไม่ให้ไฟล์ของคนก่อนหน้าค้างข้ามบัญชี
+    clearResult();
     loadTabPrefs();
     loadNotes();
     applyI18n();
@@ -440,6 +471,9 @@ function login(u) {
 function logout() {
     user = null;
     localStorage.removeItem(STORE + "session");
+    Token.set(null);
+    clearFile();
+    clearResult();
     loadTabPrefs();
     loadNotes();
     applyI18n();
@@ -468,7 +502,10 @@ $("langSelect").addEventListener("change", (e) => {
 $("btnReset").onclick = () => {
     Object.keys(localStorage).filter((k) => k.startsWith(STORE)).forEach((k) => localStorage.removeItem(k));
     user = null; lang = "th";
+    Blobs.clearAll();
+    clearFile(); clearResult();
     loadTabPrefs(); loadNotes(); applyI18n();
+    $("langSelect").value = lang;
     $("notesStatus").textContent = t("settings.resetOk");
 };
 
@@ -522,7 +559,7 @@ if (dz) {
     dz.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
 }
 $("fileInput").onchange = (e) => setFile(e.target.files[0]);
-$("clearFile").onclick = () => { clearFile(); clearResult(); };
+$("btnClearFile").onclick = () => { clearFile(); clearResult(); };
 $("clearPrompt").onclick = () => { $("promptInput").value = ""; $("negativeInput").value = ""; syncURL(); };
 [$("promptInput"), $("negativeInput")].forEach((el) => el.addEventListener("input", syncURL));
 
@@ -547,7 +584,3 @@ $("clearPrompt").onclick = () => { $("promptInput").value = ""; $("negativeInput
     }
     $("langSelect").value = lang;
 })();
-
-__blobs()
-// ก่อนแก้ → {preview:'blob:...', result:'blob:...', ...} สะสมเรื่อย ๆ ใน Memory tab
-// หลังแก้ → {} ว่างเปล่าทุกครั้งหลัง Remove
