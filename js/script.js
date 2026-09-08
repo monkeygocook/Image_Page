@@ -1,6 +1,6 @@
 /* ============================================================
    script.js — ทั้งหมดของหน้าบ้าน
-   อัปเดต: 2026-09-06 (แก้นามสกุลไฟล์ดาวน์โหลดให้ตรงกับ MIME จริง)
+   อัปเดต: 2026-09-08 (บังคับเข้าสู่ระบบก่อนใช้งานทุกฟังก์ชัน)
    ============================================================ */
 const $ = (id) => document.getElementById(id);
 
@@ -34,10 +34,28 @@ window.addEventListener("pagehide", () => Blobs.clearAll());
 window.__blobs = Blobs.debug;   // เปิด console พิมพ์ __blobs() ดูได้ว่าค้างกี่ตัว
 
 /* ============================================================
+   0.5 อ่าน session พร้อมตรวจวันหมดอายุ
+   ============================================================ */
+let sessionExpired = false;
+
+function loadSession() {
+    const raw = JSON.parse(localStorage.getItem(STORE + "session") || "null");
+    if (!raw) return null;
+    // exp = เวลาหมดอายุ (ms) — เลียนแบบ exp claim ของ JWT
+    if (typeof raw.exp === "number" && Date.now() > raw.exp) {
+        localStorage.removeItem(STORE + "session");
+        localStorage.removeItem(STORE + "token");
+        sessionExpired = true;
+        return null;
+    }
+    return raw;
+}
+
+/* ============================================================
    State — ไม่มีตัวแปรเก็บ URL แล้ว ใช้ getter อ่านจาก Blobs อย่างเดียว
    ============================================================ */
 let lang = localStorage.getItem(STORE + "lang") || "th";
-let user = JSON.parse(localStorage.getItem(STORE + "session") || "null");
+let user = loadSession();
 let currentTab = null;
 let currentFile = null;
 let optionState = {};
@@ -47,6 +65,17 @@ let authMode = "login";
 const previewURL = () => Blobs.get("preview");
 const resultURL = () => Blobs.get("result");
 const beforeURL = () => Blobs.get("before");
+
+/* ---------- ด่านตรวจสิทธิ์ ---------- */
+const authRequired = () => REQUIRE_AUTH && !user;
+
+/** ใช้นำหน้าทุกฟังก์ชันที่ต้องล็อกอิน — คืน true แปลว่า "ถูกบล็อก" */
+function guardAuth() {
+    if (!authRequired()) return false;
+    showHint(t("auth.required"));
+    openAuth("login");
+    return true;
+}
 
 /* ---------- i18n ---------- */
 const t = (k, vars = {}) =>
@@ -61,7 +90,10 @@ function applyI18n() {
     $("popAuthLabel").textContent = user ? t("nav.logout") : t("nav.login");
     $("popName").textContent = user ? user.name : t("nav.guest");
     $("popMail").textContent = user ? user.email : "";
+    $("popRole").textContent = user ? t("role." + (user.role || "user")) : "";
+    $("popRole").hidden = !user;
     $("avatarText").textContent = user ? user.name.slice(0, 1).toUpperCase() : "?";
+    if (!$("authModal").hidden) openAuth(authMode);   // แปลข้อความในกล่องล็อกอินด้วย
     renderTabBar();
     if (currentTab) switchTab(currentTab, true);
 }
@@ -92,7 +124,7 @@ function renderTabBar() {
         b.className = "tab" + (id === currentTab ? " active" : "");
         b.textContent = TAB_CONFIG[id].label;
         b.dataset.tab = id;
-        b.onclick = () => switchTab(id);
+        b.onclick = () => { if (guardAuth()) return; switchTab(id); };
         bar.appendChild(b);
     });
 }
@@ -128,8 +160,36 @@ function commitTabs() {
 }
 
 /* ============================================================
-   2. switchTab + renderOptions
+   2. switchTab + renderOptions + สถานะล็อก
    ============================================================ */
+
+/** ชั้นที่ 1+2: เบลอหน้าจอ และปิดการใช้งานทุก control เมื่อยังไม่ล็อกอิน */
+function applyLockState() {
+    const locked = authRequired();
+    const cfg = currentTab ? TAB_CONFIG[currentTab] : null;
+
+    document.body.classList.toggle("locked", locked);
+
+    // ช่อง prompt: ต้องทั้ง "ไม่ล็อก" และ "แท็บนี้ใช้ prompt" ถึงจะพิมพ์ได้
+    [$("promptInput"), $("negativeInput")].forEach(
+        (el) => (el.disabled = locked || !cfg?.usesPrompt)
+    );
+    $("clearPrompt").disabled = locked;
+    $("fileInput").disabled = locked;
+    $("btnClearFile").disabled = locked;
+    $("submitBtn").disabled = locked;
+    $("btnDownload").disabled = locked || !resultURL();
+    $("dropZone").setAttribute("aria-disabled", String(locked));
+    $("authClose").hidden = locked;   // ล็อกอยู่ = ห้ามปิดกล่องล็อกอิน
+}
+
+/** เรียกทุกครั้งที่สถานะล็อกอินเปลี่ยน */
+function refreshAuthState() {
+    applyLockState();
+    if (authRequired()) openAuth("login");
+    else $("authModal").hidden = true;
+}
+
 function switchTab(name, keepResult = false) {
     currentTab = name;
     const cfg = TAB_CONFIG[name];
@@ -138,7 +198,6 @@ function switchTab(name, keepResult = false) {
 
     /* --- Prompt: เฉพาะแท็บที่ใช้จริง --- */
     $("promptGroup").hidden = !cfg.usesPrompt;
-    [$("promptInput"), $("negativeInput")].forEach((el) => (el.disabled = !cfg.usesPrompt));
     if (!cfg.usesPrompt) { $("promptInput").value = ""; $("negativeInput").value = ""; }
 
     /* --- Uploader --- */
@@ -149,8 +208,9 @@ function switchTab(name, keepResult = false) {
     // keepResult = true แปลว่าแค่รีเฟรชภาษา → ต้องคงค่าที่ผู้ใช้เลือกไว้
     renderOptions(cfg, keepResult);
     $("submitBtn").textContent = L(cfg.cta);
-    showHint(L(cfg.hint), true);
+    showHint(authRequired() ? t("auth.required") : L(cfg.hint), !authRequired());
     if (!keepResult) clearResult();
+    applyLockState();                 // ต้องอยู่หลังสุด เพื่อทับค่า disabled ให้ถูก
     syncURL();
 }
 
@@ -175,6 +235,7 @@ function renderOptions(cfg, preserve = false) {
                 c.className = "chip" + (v.v === start ? " on" : "");
                 c.textContent = v[lang];
                 c.onclick = () => {
+                    if (guardAuth()) return;
                     optionState[key] = v.v;
                     chips.querySelectorAll(".chip").forEach((x) => x.classList.remove("on"));
                     c.classList.add("on");
@@ -202,6 +263,7 @@ function renderOptions(cfg, preserve = false) {
    3. ไฟล์อัปโหลด
    ============================================================ */
 function setFile(file) {
+    if (guardAuth()) return;          // ชั้นที่ 3: กันการลากไฟล์มาวางตอนยังไม่ล็อกอิน
     if (!file) return;
     const cfg = TAB_CONFIG[currentTab];
     if (!cfg.accept?.includes(file.type)) return showHint(t("hint.badType"));
@@ -270,7 +332,7 @@ function showResult(url, beforeSrc) {
     $("resultEmpty").hidden = true;
     $("resultImage").src = url;
     $("soloImage").src = url;
-    $("btnDownload").disabled = false;
+    $("btnDownload").disabled = authRequired();
 
     const canCompare = !!beforeSrc;
     $("compareToggleWrap").hidden = !canCompare;
@@ -289,6 +351,7 @@ $("compareToggle").onchange = paintCompare;
 $("compareRange").oninput = paintCompare;
 
 $("btnDownload").onclick = async () => {
+    if (guardAuth()) return;
     const url = resultURL();
     if (!url) return;
 
@@ -331,6 +394,7 @@ function showHint(msg, info = false) {
 }
 
 function validate() {
+    if (guardAuth()) return false;    // ชั้นที่ 3: ด่านสุดท้ายก่อนยิงงาน
     const cfg = TAB_CONFIG[currentTab];
     if (cfg.usesPrompt && !$("promptInput").value.trim()) {
         showHint(t("hint.needPrompt")); $("promptInput").focus(); return false;
@@ -340,7 +404,7 @@ function validate() {
 }
 
 function setBusy(on) {
-    $("submitBtn").disabled = on;
+    $("submitBtn").disabled = on || authRequired();
     $("spinner").hidden = !on;
     if (on) { $("resultEmpty").hidden = true; $("soloImage").hidden = true; $("compareWrap").hidden = true; }
 }
@@ -387,7 +451,7 @@ async function apiFetch(path, { auth = true, ...opts } = {}) {
     if (res.status === 401) {          // token หมดอายุ → เด้งกลับหน้าล็อกอิน
         Token.set(null);
         logout();
-        openAuth("login");
+        $("authErr").textContent = t("auth.expired");
         throw new Error("UNAUTHORIZED");
     }
     if (!res.ok) {
@@ -447,6 +511,10 @@ async function mockRequest(cfg) {
    ============================================================ */
 const users = () => JSON.parse(localStorage.getItem(STORE + "users") || "[]");
 const saveUsers = (u) => localStorage.setItem(STORE + "users", JSON.stringify(u));
+
+/* ⚠️ djb2 ไม่ใช่ cryptographic hash — ใช้ได้เฉพาะโหมด mock เท่านั้น
+   ระบบจริงต้องแฮชที่ "หลังบ้าน" ด้วย argon2id หรือ bcrypt (cost >= 12)
+   การแฮชฝั่ง client ไม่ช่วยเรื่องความปลอดภัยเลย เพราะโค้ดเปิดให้อ่านได้ทุกคน */
 const hash = (s) => { let h = 5381; for (const c of s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return h.toString(16); };
 
 function openAuth(mode = "login") {
@@ -455,13 +523,14 @@ function openAuth(mode = "login") {
     $("authSubmit").textContent = t(mode === "login" ? "auth.login" : "auth.register");
     $("authSwitch").textContent = t(mode === "login" ? "auth.toReg" : "auth.toLogin");
     $("nameField").hidden = mode === "login";
+    $("authPass").autocomplete = mode === "login" ? "current-password" : "new-password";
     $("authErr").textContent = "";
     $("authModal").hidden = false;
-    $("authEmail").focus();
+    $("authClose").hidden = authRequired();
+    setTimeout(() => $(mode === "login" ? "authEmail" : "authName").focus(), 50);
 }
 
 $("authSwitch").onclick = () => openAuth(authMode === "login" ? "register" : "login");
-$("authGuest").onclick = () => { $("authModal").hidden = true; };
 
 $("authForm").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -472,34 +541,45 @@ $("authForm").addEventListener("submit", (e) => {
 
     if (!email || !pass || (authMode === "register" && !name)) return err("auth.errFields");
     if (!/^\S+@\S+\.\S+$/.test(email)) return err("auth.errEmail");
-    if (pass.length < 6) return err("auth.errShort");
+
+    // ตรวจความแข็งแรงของรหัสผ่าน "เฉพาะตอนสมัคร"
+    // ตอนล็อกอินไม่ตรวจ เพราะบัญชีเก่าอาจตั้งไว้ก่อนกฎใหม่ (ระบบจริงก็ทำแบบนี้)
+    if (authMode === "register") {
+        if (pass.length < 8) return err("auth.errShort");
+        if (!/[A-Za-z]/.test(pass) || !/\d/.test(pass)) return err("auth.errWeak");
+    }
 
     const list = users();
     const found = list.find((u) => u.email === email);
 
     if (authMode === "register") {
         if (found) return err("auth.errExists");
-        list.push({ name, email, pw: hash(pass) });
+        list.push({ name, email, pw: hash(pass), role: "user", created_at: new Date().toISOString() });
         saveUsers(list);
-        login({ name, email });
+        login({ name, email, role: "user" });
     } else {
+        // ข้อความ error ต้องคลุมเครือเหมือนกันทั้ง 2 กรณี
+        // ไม่งั้นคนร้ายจะเดาได้ว่าอีเมลไหนมีอยู่ในระบบ (user enumeration)
         if (!found) return err("auth.errNoUser");
         if (found.pw !== hash(pass)) return err("auth.errPass");
-        login({ name: found.name, email: found.email });
+        login({ name: found.name, email: found.email, role: found.role || "user" });
     }
 });
 
 function login(u, token = null) {
-    user = u;
-    localStorage.setItem(STORE + "session", JSON.stringify(u));
+    const exp = Date.now() + SESSION_TTL_HOURS * 3600 * 1000;
+    user = { ...u, exp };
+    sessionExpired = false;
+    localStorage.setItem(STORE + "session", JSON.stringify(user));
     if (token) Token.set(token);          // โหมดจริง: เก็บ access_token จากหลังบ้าน
-    $("authModal").hidden = true;
     $("authForm").reset();
     clearFile();                          // ไม่ให้ไฟล์ของคนก่อนหน้าค้างข้ามบัญชี
     clearResult();
     loadTabPrefs();
     loadNotes();
     applyI18n();
+    refreshAuthState();                   // ปลดล็อกหน้าจอ + ปิดกล่องล็อกอิน
+    if (!visibleTabs().includes(currentTab)) switchTab(visibleTabs()[0]);
     showHint(t("auth.welcome", { name: u.name }), true);
 }
 
@@ -509,9 +589,10 @@ function logout() {
     Token.set(null);
     clearFile();
     clearResult();
-    loadTabPrefs();
+    loadTabPrefs();                       // กลับไปใช้ค่าของ guest
     loadNotes();
     applyI18n();
+    refreshAuthState();                   // ล็อกหน้าจอ + เปิดกล่องล็อกอินค้างไว้
 }
 
 /* ============================================================
@@ -521,6 +602,7 @@ let noteTimer;
 function loadNotes() { $("notesInput").value = localStorage.getItem(uKey("notes")) || ""; }
 
 $("notesInput").addEventListener("input", () => {
+    if (authRequired()) return;
     clearTimeout(noteTimer);
     noteTimer = setTimeout(() => {
         localStorage.setItem(uKey("notes"), $("notesInput").value);
@@ -530,7 +612,7 @@ $("notesInput").addEventListener("input", () => {
 
 $("langSelect").addEventListener("change", (e) => {
     lang = e.target.value;
-    localStorage.setItem(STORE + "lang", lang);
+    localStorage.setItem(STORE + "lang", lang);   // ภาษาเก็บแยกจากบัญชี ใช้ร่วมทุกคน
     applyI18n();
 });
 
@@ -541,22 +623,42 @@ $("btnReset").onclick = () => {
     clearFile(); clearResult();
     loadTabPrefs(); loadNotes(); applyI18n();
     $("langSelect").value = lang;
+    $("settingsModal").hidden = true;
     $("notesStatus").textContent = t("settings.resetOk");
+    refreshAuthState();                   // ล้างข้อมูล = ออกจากระบบด้วย
 };
 
 /* ============================================================
    8. เมนู / Modal / URL
    ============================================================ */
 const openModal = (id) => ($(id).hidden = false);
-document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => (b.closest(".modal").hidden = true)));
-document.querySelectorAll(".modal").forEach((m) =>
-    (m.onclick = (e) => { if (e.target === m) m.hidden = true; }));
+
+/** กล่องล็อกอินต้องปิดไม่ได้ ถ้ายังไม่ผ่านการยืนยันตัวตน */
+const canClose = (m) => !(m.id === "authModal" && authRequired());
+
+document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => {
+    const m = b.closest(".modal");
+    if (canClose(m)) m.hidden = true;
+}));
+
+document.querySelectorAll(".modal").forEach((m) => (m.onclick = (e) => {
+    if (e.target === m && canClose(m)) m.hidden = true;
+}));
+
 document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") document.querySelectorAll(".modal").forEach((m) => (m.hidden = true));
+    if (e.key !== "Escape") return;
+    document.querySelectorAll(".modal").forEach((m) => { if (canClose(m)) m.hidden = true; });
 });
 
-$("btnMenu").onclick = (e) => { e.stopPropagation(); $("menuPop").hidden = !$("menuPop").hidden; };
-$("btnAccount").onclick = (e) => { e.stopPropagation(); user ? ($("menuPop").hidden = !$("menuPop").hidden) : openAuth("login"); };
+$("btnMenu").onclick = (e) => {
+    e.stopPropagation();
+    if (guardAuth()) return;
+    $("menuPop").hidden = !$("menuPop").hidden;
+};
+$("btnAccount").onclick = (e) => {
+    e.stopPropagation();
+    user ? ($("menuPop").hidden = !$("menuPop").hidden) : openAuth("login");
+};
 document.addEventListener("click", () => ($("menuPop").hidden = true));
 $("menuPop").onclick = (e) => e.stopPropagation();
 
@@ -564,13 +666,18 @@ $("menuPop").querySelectorAll(".pop-item").forEach((btn) => {
     btn.addEventListener("click", () => {
         $("menuPop").hidden = true;
         const act = btn.dataset.act;
+        if (act === "auth") { user ? logout() : openAuth("login"); return; }
+        if (guardAuth()) return;                    // settings / tabs ต้องล็อกอินก่อน
         if (act === "settings") { $("langSelect").value = lang; loadNotes(); openModal("settingsModal"); }
         if (act === "tabs") { renderTabManager(); openModal("tabsModal"); }
-        if (act === "auth") user ? logout() : openAuth("login");
     });
 });
 
-$("btnTabs").onclick = () => { renderTabManager(); openModal("tabsModal"); };
+$("btnTabs").onclick = () => {
+    if (guardAuth()) return;
+    renderTabManager();
+    openModal("tabsModal");
+};
 
 function syncURL() {
     const cfg = TAB_CONFIG[currentTab];
@@ -587,16 +694,40 @@ function syncURL() {
 /* ---------- Uploader events ---------- */
 const dz = $("dropZone");
 if (dz) {
-    dz.onclick = () => $("fileInput").click();
-    dz.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); } };
-    ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("dragover"); }));
+    dz.onclick = () => { if (guardAuth()) return; $("fileInput").click(); };
+    dz.onkeydown = (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        if (guardAuth()) return;
+        $("fileInput").click();
+    };
+    ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => {
+        e.preventDefault();
+        if (!authRequired()) dz.classList.add("dragover");
+    }));
     ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("dragover"); }));
     dz.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
 }
 $("fileInput").onchange = (e) => setFile(e.target.files[0]);
-$("btnClearFile").onclick = () => { clearFile(); clearResult(); };
-$("clearPrompt").onclick = () => { $("promptInput").value = ""; $("negativeInput").value = ""; syncURL(); };
+$("btnClearFile").onclick = () => { if (guardAuth()) return; clearFile(); clearResult(); };
+$("clearPrompt").onclick = () => {
+    if (guardAuth()) return;
+    $("promptInput").value = ""; $("negativeInput").value = ""; syncURL();
+};
 [$("promptInput"), $("negativeInput")].forEach((el) => el.addEventListener("input", syncURL));
+
+/* ---------- กันการลากไฟล์มาวางนอก dropzone (เบราว์เซอร์จะเปิดไฟล์แทนหน้าเว็บ) ---------- */
+["dragover", "drop"].forEach((ev) =>
+    window.addEventListener(ev, (e) => { if (e.target !== dz && !dz?.contains(e.target)) e.preventDefault(); })
+);
+
+/* ---------- ซิงก์สถานะข้ามแท็บเบราว์เซอร์ ---------- */
+window.addEventListener("storage", (e) => {
+    if (e.key !== STORE + "session") return;
+    user = loadSession();                 // ออกจากระบบที่แท็บหนึ่ง → แท็บอื่นล็อกตาม
+    applyI18n();
+    refreshAuthState();
+});
 
 /* ============================================================
    9. Init
@@ -618,4 +749,7 @@ $("clearPrompt").onclick = () => { $("promptInput").value = ""; $("negativeInput
         $("negativeInput").value = q.get("negativePrompt") || "";
     }
     $("langSelect").value = lang;
+
+    refreshAuthState();                                   // ล็อก/ปลดล็อกตามสถานะจริง
+    if (sessionExpired) $("authErr").textContent = t("auth.expired");
 })();

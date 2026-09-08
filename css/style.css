@@ -42,6 +42,49 @@ body {
     text-align: center
 }
 
+/* ---------- สถานะล็อก (ยังไม่เข้าสู่ระบบ) ---------- */
+body.locked .layout {
+    filter: blur(5px) grayscale(.3);
+    pointer-events: none;
+    user-select: none
+}
+
+body.locked .tabbar,
+body.locked #btnTabs,
+body.locked #btnMenu {
+    opacity: .4;
+    pointer-events: none
+}
+
+.lock-chip {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 22px;
+    background: #eef2ff;
+    margin: 0 auto 10px
+}
+
+.gate-desc {
+    text-align: center;
+    font-size: 13px;
+    margin: 0 0 14px
+}
+
+.role-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: var(--brand);
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle
+}
+
 /* ---------- แถบ MOCK ---------- */
 .mock-badge {
     position: sticky;
@@ -178,7 +221,8 @@ body {
     padding: 18px;
     max-width: 1500px;
     margin: auto;
-    align-items: start
+    align-items: start;
+    transition: filter .25s
 }
 
 @media(max-width:1000px) {
@@ -213,6 +257,13 @@ select {
     resize: vertical
 }
 
+textarea:disabled,
+input:disabled,
+select:disabled {
+    background: #f8fafc;
+    cursor: not-allowed
+}
+
 textarea:focus,
 input:focus,
 select:focus {
@@ -233,8 +284,13 @@ select:focus {
     padding: 4px 2px
 }
 
-.link-btn:hover {
+.link-btn:hover:not(:disabled) {
     text-decoration: underline
+}
+
+.link-btn:disabled {
+    opacity: .45;
+    cursor: not-allowed
 }
 
 .link-btn.danger {
@@ -397,7 +453,7 @@ select:focus {
 
 .cta:disabled {
     opacity: .6;
-    cursor: progress
+    cursor: not-allowed
 }
 
 /* ---------- Result ---------- */
@@ -534,6 +590,11 @@ select:focus {
     padding: 18px
 }
 
+#authModal {
+    z-index: 95;
+    background: rgba(15, 23, 42, .55)
+}
+
 .modal-box {
     position: relative;
     background: #fff;
@@ -550,7 +611,8 @@ select:focus {
 }
 
 .modal-box h3 {
-    margin: 0 0 6px
+    margin: 0 0 6px;
+    text-align: center
 }
 
 .modal-x {

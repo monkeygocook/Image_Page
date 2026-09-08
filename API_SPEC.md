@@ -174,6 +174,7 @@ curl -X PUT http://127.0.0.1:7860/api/v1/preferences \
 ## 4. Image Endpoints
 
 ทุก endpoint ในหมวดนี้ **ต้องมี token** และตอบกลับเป็น **binary image stream** (ไม่ใช่ JSON)
+Endpoint ทุกตัวใน section 4 → เพิ่ม "ต้องมี Authorization: Bearer <token> ไม่งั้นตอบ 401"
 
 | Response header | ตัวอย่าง |
 |---|---|

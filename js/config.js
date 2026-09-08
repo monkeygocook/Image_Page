@@ -2,20 +2,23 @@
    config.js — Single Source of Truth
    ทีมหลังบ้าน: อ่านไฟล์นี้ไฟล์เดียวพอ
    ============================================================ */
-/* ---------- ที่อยู่ API ---------- */
-const API_PORT = 7860;
-const API_BASE = new URLSearchParams(location.search).get("api")   // ?api=http://x.x.x.x:7860
-    || `${location.protocol}//${location.hostname}:${API_PORT}`;
+
+const API_BASE = `http://${location.hostname}:7860`;
 const USE_MOCK = true;              // ⚠️ เปลี่ยนเป็น false เมื่อหลังบ้านพร้อม
 const REQUEST_TIMEOUT = 120000;     // 2 นาที
 const STORE = "imgstudio:";         // prefix ของ localStorage
+
+/* ---------- การควบคุมการเข้าถึง ---------- */
+const REQUIRE_AUTH = true;          // true = ต้องล็อกอินก่อนใช้งานทุกฟังก์ชัน
+const SESSION_TTL_HOURS = 24;       // อายุ session (ชั่วโมง) หมดแล้วเด้งออกอัตโนมัติ
 
 /* ---------- พจนานุกรม 2 ภาษา ---------- */
 const I18N = {
     th: {
         "app.title": "AI Image Studio",
         "nav.settings": "ตั้งค่า", "nav.tabs": "จัดการแท็บ",
-        "nav.login": "เข้าสู่ระบบ", "nav.logout": "ออกจากระบบ", "nav.guest": "ผู้เยี่ยมชม",
+        "nav.login": "เข้าสู่ระบบ", "nav.logout": "ออกจากระบบ", "nav.guest": "ยังไม่ได้เข้าสู่ระบบ",
+        "role.user": "ผู้ใช้ทั่วไป", "role.staff": "เจ้าหน้าที่",
         "prompt.clear": "ล้าง Prompt",
         "prompt.ph": "Prompt\n(อธิบายภาพที่ต้องการ...)",
         "negative.ph": "Negative Prompt\n(สิ่งที่ไม่ต้องการให้มี...)",
@@ -40,17 +43,20 @@ const I18N = {
         "tabs.title": "จัดการแท็บ",
         "tabs.desc": "เลือกแท็บที่ต้องการแสดง และเรียงลำดับได้ตามใจ",
         "tabs.min": "ต้องเปิดไว้อย่างน้อย 1 แท็บ",
+        "gate.desc": "ต้องเข้าสู่ระบบก่อน จึงจะใช้งานฟังก์ชันต่าง ๆ ได้",
         "auth.title": "เข้าสู่ระบบ", "auth.titleReg": "สมัครสมาชิก",
         "auth.name": "ชื่อที่แสดง", "auth.email": "อีเมล", "auth.pass": "รหัสผ่าน",
         "auth.login": "เข้าสู่ระบบ", "auth.register": "สมัครสมาชิก",
         "auth.toReg": "ยังไม่มีบัญชี? สมัครเลย", "auth.toLogin": "มีบัญชีแล้ว? เข้าสู่ระบบ",
-        "auth.guest": "ใช้งานแบบไม่ล็อกอิน",
+        "auth.required": "🔒 กรุณาเข้าสู่ระบบก่อนใช้งาน",
+        "auth.expired": "เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่",
         "auth.errFields": "กรอกข้อมูลให้ครบก่อนครับ",
         "auth.errEmail": "รูปแบบอีเมลไม่ถูกต้อง",
-        "auth.errShort": "รหัสผ่านต้องยาวอย่างน้อย 6 ตัว",
+        "auth.errShort": "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร",
+        "auth.errWeak": "รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข",
         "auth.errExists": "อีเมลนี้ถูกใช้แล้ว",
-        "auth.errNoUser": "ไม่พบบัญชีนี้",
-        "auth.errPass": "รหัสผ่านไม่ถูกต้อง",
+        "auth.errNoUser": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+        "auth.errPass": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
         "auth.welcome": "ยินดีต้อนรับ {name}",
         "auth.mockNote": "🧪 บัญชีเก็บในเครื่องนี้เท่านั้น (mock) ยังไม่ได้ต่อหลังบ้าน",
         "badge.mock": "🧪 MOCK MODE — ยังไม่ได้เชื่อมหลังบ้าน",
@@ -59,7 +65,8 @@ const I18N = {
     en: {
         "app.title": "AI Image Studio",
         "nav.settings": "Settings", "nav.tabs": "Manage tabs",
-        "nav.login": "Sign in", "nav.logout": "Sign out", "nav.guest": "Guest",
+        "nav.login": "Sign in", "nav.logout": "Sign out", "nav.guest": "Not signed in",
+        "role.user": "User", "role.staff": "Staff",
         "prompt.clear": "Clear prompt",
         "prompt.ph": "Prompt\n(Describe the image you want...)",
         "negative.ph": "Negative Prompt\n(Describe what you don't want...)",
@@ -84,17 +91,20 @@ const I18N = {
         "tabs.title": "Manage tabs",
         "tabs.desc": "Choose which tabs to show and reorder them.",
         "tabs.min": "At least one tab must stay visible",
+        "gate.desc": "You must sign in before using any feature.",
         "auth.title": "Sign in", "auth.titleReg": "Create account",
         "auth.name": "Display name", "auth.email": "Email", "auth.pass": "Password",
         "auth.login": "Sign in", "auth.register": "Create account",
         "auth.toReg": "No account? Sign up", "auth.toLogin": "Have an account? Sign in",
-        "auth.guest": "Continue as guest",
+        "auth.required": "🔒 Please sign in to continue",
+        "auth.expired": "Your session has expired. Please sign in again.",
         "auth.errFields": "Please fill in every field",
         "auth.errEmail": "Invalid email format",
-        "auth.errShort": "Password must be at least 6 characters",
+        "auth.errShort": "Password must be at least 8 characters",
+        "auth.errWeak": "Password must contain both letters and numbers",
         "auth.errExists": "That email is already registered",
-        "auth.errNoUser": "Account not found",
-        "auth.errPass": "Incorrect password",
+        "auth.errNoUser": "Incorrect email or password",
+        "auth.errPass": "Incorrect email or password",
         "auth.welcome": "Welcome, {name}",
         "auth.mockNote": "🧪 Accounts are stored locally (mock) — no backend yet",
         "badge.mock": "🧪 MOCK MODE — backend not connected",

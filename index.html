@@ -20,7 +20,11 @@
         <button id="btnMenu" class="icon-btn" title="เมนู">☰</button>
 
         <div id="menuPop" class="popover" hidden>
-            <div class="pop-user"><strong id="popName">—</strong><small id="popMail"></small></div>
+            <div class="pop-user">
+                <strong id="popName">—</strong>
+                <span id="popRole" class="role-tag" hidden></span>
+                <small id="popMail"></small>
+            </div>
             <button class="pop-item" data-act="settings"><span>⚙️</span><span data-i18n="nav.settings"></span></button>
             <button class="pop-item" data-act="tabs"><span>✏️</span><span data-i18n="nav.tabs"></span></button>
             <hr>
@@ -116,10 +120,12 @@
         </div>
     </div>
 
-    <!-- ===== Modal: ล็อกอิน ===== -->
+    <!-- ===== Modal: ล็อกอิน (ประตูหลักของระบบ) ===== -->
     <div id="authModal" class="modal" hidden>
         <div class="modal-box narrow">
+            <div class="lock-chip">🔒</div>
             <h3 id="authTitle"></h3>
+            <p class="muted gate-desc" data-i18n="gate.desc"></p>
             <form id="authForm">
                 <label class="field" id="nameField" hidden>
                     <span data-i18n="auth.name"></span>
@@ -137,9 +143,8 @@
                 <button type="submit" class="cta" id="authSubmit"></button>
             </form>
             <button id="authSwitch" class="link-btn center"></button>
-            <button id="authGuest" class="link-btn center muted" data-i18n="auth.guest"></button>
             <small class="muted center" data-i18n="auth.mockNote"></small>
-            <button class="modal-x" data-close>✕</button>
+            <button id="authClose" class="modal-x" data-close>✕</button>
         </div>
     </div>
 
