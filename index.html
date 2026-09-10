@@ -27,6 +27,9 @@
             </div>
             <button class="pop-item" data-act="settings"><span>⚙️</span><span data-i18n="nav.settings"></span></button>
             <button class="pop-item" data-act="tabs"><span>✏️</span><span data-i18n="nav.tabs"></span></button>
+            <button class="pop-item staff-only" id="popAdmin" data-act="admin" hidden>
+                <span>🛡️</span><span data-i18n="nav.admin"></span>
+            </button>
             <hr>
             <button class="pop-item" data-act="auth"><span>👤</span><span id="popAuthLabel"></span></button>
         </div>
@@ -143,6 +146,7 @@
                 <button type="submit" class="cta" id="authSubmit"></button>
             </form>
             <button id="authSwitch" class="link-btn center"></button>
+            <small id="seedNote" class="seed-note"></small>
             <small class="muted center" data-i18n="auth.mockNote"></small>
             <button id="authClose" class="modal-x" data-close>✕</button>
         </div>

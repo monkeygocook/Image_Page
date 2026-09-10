@@ -11,6 +11,18 @@ const STORE = "imgstudio:";         // prefix ของ localStorage
 /* ---------- การควบคุมการเข้าถึง ---------- */
 const REQUIRE_AUTH = true;          // true = ต้องล็อกอินก่อนใช้งานทุกฟังก์ชัน
 const SESSION_TTL_HOURS = 24;       // อายุ session (ชั่วโมง) หมดแล้วเด้งออกอัตโนมัติ
+const ROLES = ["user", "staff"];    // สิทธิ์ทั้งหมดในระบบ
+const ADMIN_PAGE = "admin.html";    // หน้าเจ้าหน้าที่
+const APP_PAGE = "index.html";      // หน้าผู้ใช้ทั่วไป
+
+/* บัญชีเจ้าหน้าที่ตั้งต้น — สร้างอัตโนมัติเมื่อยังไม่มี staff ในระบบ
+   ⚠️ โหมด mock เท่านั้น ระบบจริงต้องสร้างจากฝั่งหลังบ้าน (seed script / CLI) */
+const SEED_STAFF = {
+    name: "Staff Admin",
+    email: "staff@local.dev",
+    password: "Staff1234",
+    role: "staff",
+};
 
 /* ---------- พจนานุกรม 2 ภาษา ---------- */
 const I18N = {
@@ -18,6 +30,7 @@ const I18N = {
         "app.title": "AI Image Studio",
         "nav.settings": "ตั้งค่า", "nav.tabs": "จัดการแท็บ",
         "nav.login": "เข้าสู่ระบบ", "nav.logout": "ออกจากระบบ", "nav.guest": "ยังไม่ได้เข้าสู่ระบบ",
+        "nav.admin": "หน้าเจ้าหน้าที่",
         "role.user": "ผู้ใช้ทั่วไป", "role.staff": "เจ้าหน้าที่",
         "prompt.clear": "ล้าง Prompt",
         "prompt.ph": "Prompt\n(อธิบายภาพที่ต้องการ...)",
@@ -59,13 +72,46 @@ const I18N = {
         "auth.errPass": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
         "auth.welcome": "ยินดีต้อนรับ {name}",
         "auth.mockNote": "🧪 บัญชีเก็บในเครื่องนี้เท่านั้น (mock) ยังไม่ได้ต่อหลังบ้าน",
+        "auth.seedNote": "🔑 บัญชีเจ้าหน้าที่ทดสอบ — {email} / {pass}",
         "badge.mock": "🧪 MOCK MODE — ยังไม่ได้เชื่อมหลังบ้าน",
         "common.close": "ปิด", "common.cancel": "ยกเลิก",
+
+        /* ---------- หน้าเจ้าหน้าที่ ---------- */
+        "admin.title": "ระบบจัดการเจ้าหน้าที่",
+        "admin.subtitle": "จัดการบัญชีผู้ใช้และสิทธิ์การเข้าถึง",
+        "admin.back": "กลับหน้าหลัก",
+        "admin.signedAs": "เข้าใช้งานในนาม",
+        "admin.denied": "ไม่มีสิทธิ์เข้าถึง",
+        "admin.deniedDesc": "หน้านี้สำหรับเจ้าหน้าที่เท่านั้น บัญชีของคุณมีสิทธิ์ระดับ “{role}”",
+        "admin.warn": "⚠️ การตรวจสอบสิทธิ์นี้ทำงานฝั่งผู้ใช้เท่านั้น — ระบบจริงต้องตรวจซ้ำที่หลังบ้านทุกครั้ง",
+        "admin.statTotal": "ผู้ใช้ทั้งหมด",
+        "admin.statStaff": "เจ้าหน้าที่",
+        "admin.statUser": "ผู้ใช้ทั่วไป",
+        "admin.statSize": "พื้นที่ที่ใช้",
+        "admin.search": "ค้นหาชื่อหรืออีเมล...",
+        "admin.export": "ส่งออก JSON",
+        "admin.colName": "ชื่อ",
+        "admin.colEmail": "อีเมล",
+        "admin.colRole": "สิทธิ์",
+        "admin.colCreated": "สมัครเมื่อ",
+        "admin.colActions": "จัดการ",
+        "admin.promote": "เลื่อนเป็นเจ้าหน้าที่",
+        "admin.demote": "ลดเป็นผู้ใช้ทั่วไป",
+        "admin.delete": "ลบบัญชี",
+        "admin.you": "คุณ",
+        "admin.empty": "ไม่พบผู้ใช้ที่ตรงกับคำค้นหา",
+        "admin.confirmDelete": "ยืนยันลบบัญชี {email} ?\n\nโน้ตส่วนตัวและการตั้งค่าแท็บของผู้ใช้รายนี้จะถูกลบไปด้วย",
+        "admin.msgRole": "เปลี่ยนสิทธิ์ {email} เป็น “{role}” เรียบร้อย",
+        "admin.msgDeleted": "ลบบัญชี {email} เรียบร้อย",
+        "admin.msgExport": "ส่งออกข้อมูลแล้ว (ไม่รวมรหัสผ่าน)",
+        "admin.errSelf": "ไม่สามารถแก้สิทธิ์หรือลบบัญชีของตัวเองได้",
+        "admin.errLastStaff": "ต้องเหลือเจ้าหน้าที่อย่างน้อย 1 คนในระบบ",
     },
     en: {
         "app.title": "AI Image Studio",
         "nav.settings": "Settings", "nav.tabs": "Manage tabs",
         "nav.login": "Sign in", "nav.logout": "Sign out", "nav.guest": "Not signed in",
+        "nav.admin": "Staff console",
         "role.user": "User", "role.staff": "Staff",
         "prompt.clear": "Clear prompt",
         "prompt.ph": "Prompt\n(Describe the image you want...)",
@@ -107,8 +153,40 @@ const I18N = {
         "auth.errPass": "Incorrect email or password",
         "auth.welcome": "Welcome, {name}",
         "auth.mockNote": "🧪 Accounts are stored locally (mock) — no backend yet",
+        "auth.seedNote": "🔑 Demo staff account — {email} / {pass}",
         "badge.mock": "🧪 MOCK MODE — backend not connected",
         "common.close": "Close", "common.cancel": "Cancel",
+
+        /* ---------- Staff console ---------- */
+        "admin.title": "Staff Console",
+        "admin.subtitle": "Manage user accounts and access rights",
+        "admin.back": "Back to app",
+        "admin.signedAs": "Signed in as",
+        "admin.denied": "Access denied",
+        "admin.deniedDesc": "This page is for staff only. Your account role is “{role}”.",
+        "admin.warn": "⚠️ This check runs client-side only — a real system must verify again on the server.",
+        "admin.statTotal": "Total users",
+        "admin.statStaff": "Staff",
+        "admin.statUser": "Regular users",
+        "admin.statSize": "Storage used",
+        "admin.search": "Search name or email...",
+        "admin.export": "Export JSON",
+        "admin.colName": "Name",
+        "admin.colEmail": "Email",
+        "admin.colRole": "Role",
+        "admin.colCreated": "Created",
+        "admin.colActions": "Actions",
+        "admin.promote": "Promote to staff",
+        "admin.demote": "Demote to user",
+        "admin.delete": "Delete",
+        "admin.you": "you",
+        "admin.empty": "No users match your search",
+        "admin.confirmDelete": "Delete account {email} ?\n\nTheir personal notes and tab settings will be removed too.",
+        "admin.msgRole": "Changed role of {email} to “{role}”",
+        "admin.msgDeleted": "Deleted account {email}",
+        "admin.msgExport": "Exported (password hashes excluded)",
+        "admin.errSelf": "You cannot change or delete your own account",
+        "admin.errLastStaff": "At least one staff account must remain",
     },
 };
 

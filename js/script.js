@@ -1,6 +1,6 @@
 /* ============================================================
-   script.js — ทั้งหมดของหน้าบ้าน
-   อัปเดต: 2026-09-08 (บังคับเข้าสู่ระบบก่อนใช้งานทุกฟังก์ชัน)
+   script.js — ทั้งหมดของหน้าบ้าน (หน้าผู้ใช้ทั่วไป)
+   อัปเดต: 2026-09-08 (เพิ่ม role guard + ทางเข้าหน้าเจ้าหน้าที่)
    ============================================================ */
 const $ = (id) => document.getElementById(id);
 
@@ -68,6 +68,7 @@ const beforeURL = () => Blobs.get("before");
 
 /* ---------- ด่านตรวจสิทธิ์ ---------- */
 const authRequired = () => REQUIRE_AUTH && !user;
+const isStaff = () => !!user && user.role === "staff";
 
 /** ใช้นำหน้าทุกฟังก์ชันที่ต้องล็อกอิน — คืน true แปลว่า "ถูกบล็อก" */
 function guardAuth() {
@@ -92,6 +93,8 @@ function applyI18n() {
     $("popMail").textContent = user ? user.email : "";
     $("popRole").textContent = user ? t("role." + (user.role || "user")) : "";
     $("popRole").hidden = !user;
+    $("popRole").classList.toggle("staff", isStaff());
+    $("popAdmin").hidden = !isStaff();               // เมนูเจ้าหน้าที่โผล่เฉพาะ staff
     $("avatarText").textContent = user ? user.name.slice(0, 1).toUpperCase() : "?";
     if (!$("authModal").hidden) openAuth(authMode);   // แปลข้อความในกล่องล็อกอินด้วย
     renderTabBar();
@@ -454,6 +457,9 @@ async function apiFetch(path, { auth = true, ...opts } = {}) {
         $("authErr").textContent = t("auth.expired");
         throw new Error("UNAUTHORIZED");
     }
+    if (res.status === 403) {          // ล็อกอินแล้วแต่สิทธิ์ไม่พอ
+        throw new Error("FORBIDDEN");
+    }
     if (!res.ok) {
         let msg = `HTTP ${res.status}`;
         try { msg = (await res.json())?.error?.message || msg; } catch { }
@@ -517,6 +523,23 @@ const saveUsers = (u) => localStorage.setItem(STORE + "users", JSON.stringify(u)
    การแฮชฝั่ง client ไม่ช่วยเรื่องความปลอดภัยเลย เพราะโค้ดเปิดให้อ่านได้ทุกคน */
 const hash = (s) => { let h = 5381; for (const c of s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return h.toString(16); };
 
+/** สร้างบัญชีเจ้าหน้าที่ตั้งต้น เมื่อระบบยังไม่มี staff เลยแม้แต่คนเดียว
+    ⚠️ mock เท่านั้น — ระบบจริงต้อง seed จากฝั่งเซิร์ฟเวอร์ */
+function ensureSeedStaff() {
+    if (!USE_MOCK) return;
+    const list = users();
+    if (list.some((u) => u.role === "staff")) return;
+    list.push({
+        name: SEED_STAFF.name,
+        email: SEED_STAFF.email,
+        pw: hash(SEED_STAFF.password),
+        role: "staff",
+        created_at: new Date().toISOString(),
+        seeded: true,
+    });
+    saveUsers(list);
+}
+
 function openAuth(mode = "login") {
     authMode = mode;
     $("authTitle").textContent = t(mode === "login" ? "auth.title" : "auth.titleReg");
@@ -524,6 +547,8 @@ function openAuth(mode = "login") {
     $("authSwitch").textContent = t(mode === "login" ? "auth.toReg" : "auth.toLogin");
     $("nameField").hidden = mode === "login";
     $("authPass").autocomplete = mode === "login" ? "current-password" : "new-password";
+    $("seedNote").textContent = t("auth.seedNote", { email: SEED_STAFF.email, pass: SEED_STAFF.password });
+    $("seedNote").hidden = !USE_MOCK || mode !== "login";
     $("authErr").textContent = "";
     $("authModal").hidden = false;
     $("authClose").hidden = authRequired();
@@ -554,6 +579,7 @@ $("authForm").addEventListener("submit", (e) => {
 
     if (authMode === "register") {
         if (found) return err("auth.errExists");
+        // สมัครเองได้เฉพาะ role "user" เท่านั้น — staff ต้องถูกเลื่อนขั้นจากหน้าเจ้าหน้าที่
         list.push({ name, email, pw: hash(pass), role: "user", created_at: new Date().toISOString() });
         saveUsers(list);
         login({ name, email, role: "user" });
@@ -621,6 +647,7 @@ $("btnReset").onclick = () => {
     user = null; lang = "th";
     Blobs.clearAll();
     clearFile(); clearResult();
+    ensureSeedStaff();                    // สร้างบัญชีเจ้าหน้าที่ตั้งต้นขึ้นใหม่
     loadTabPrefs(); loadNotes(); applyI18n();
     $("langSelect").value = lang;
     $("settingsModal").hidden = true;
@@ -667,9 +694,13 @@ $("menuPop").querySelectorAll(".pop-item").forEach((btn) => {
         $("menuPop").hidden = true;
         const act = btn.dataset.act;
         if (act === "auth") { user ? logout() : openAuth("login"); return; }
-        if (guardAuth()) return;                    // settings / tabs ต้องล็อกอินก่อน
+        if (guardAuth()) return;                    // settings / tabs / admin ต้องล็อกอินก่อน
         if (act === "settings") { $("langSelect").value = lang; loadNotes(); openModal("settingsModal"); }
         if (act === "tabs") { renderTabManager(); openModal("tabsModal"); }
+        if (act === "admin") {
+            if (!isStaff()) return;                 // ตรวจสิทธิ์ซ้ำก่อนพาไปหน้าเจ้าหน้าที่
+            location.href = ADMIN_PAGE;
+        }
     });
 });
 
@@ -723,8 +754,8 @@ $("clearPrompt").onclick = () => {
 
 /* ---------- ซิงก์สถานะข้ามแท็บเบราว์เซอร์ ---------- */
 window.addEventListener("storage", (e) => {
-    if (e.key !== STORE + "session") return;
-    user = loadSession();                 // ออกจากระบบที่แท็บหนึ่ง → แท็บอื่นล็อกตาม
+    if (e.key !== STORE + "session" && e.key !== STORE + "users") return;
+    user = loadSession();                 // ออกจากระบบ/ถูกลดสิทธิ์ที่แท็บอื่น → ตามทันที
     applyI18n();
     refreshAuthState();
 });
@@ -734,6 +765,7 @@ window.addEventListener("storage", (e) => {
    ============================================================ */
 (function init() {
     $("mockBadge").hidden = !USE_MOCK;
+    ensureSeedStaff();                                    // ต้องมาก่อนทุกอย่าง
     loadTabPrefs();
     loadNotes();
 
