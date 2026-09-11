@@ -1,4 +1,4 @@
-สรุปฟังก์ชั่นที่จะมีใน Project Image_Page นี้ มีดังนี้
+สรุปฟังก์ชั่นที่จะมีใน Project Image_Page นี้ มีดังนี้(
 1.เจนรูปภาพด้วยAi โมเดล GenImage  
     รับค่าแค่ Prompt กับ Negative Prompt  ในส่วนอื่นๆยังไม่ใช้ตอนนี้
     มีoutput เป็นภาพ ขนาด 512x768 : 2ต่อ3
@@ -6,4 +6,30 @@
 2.ลบพื้นหลัง Back  
 3.ลบลายน้ำ Icon  
 4.ฟิลเตอร์ Tone  
-ทั้ง4ฟังชั่นจะอยู่คลละเมนู จะมีเมนูแทบให้เลือกใช้ อาจเพิ่มเมนูอื่นๆ ในภายหลัง
+ทั้ง4ฟังชั่นจะอยู่คลละเมนู จะมีเมนูแทบให้เลือกใช้ อาจเพิ่มเมนูอื่นๆ ในภายหลัง)
+
+11-9-2569(
+config.js
+    TAB_ORDER เพิ่ม "blur"
+    TAB_CONFIG.blur — endpoint /api/v1/blur-image, field blur_type (6 ค่า) + blur_amount (0–100)
+    i18n 2 คีย์: hint.decodeFail, hint.exportFail
+
+loadImageEl()	โหลด blob URL เข้า <img> แบบ Promise
+canvasToBlobURL()	แปลง canvas → blob URL ตาม MIME ใน config
+toneFilter()	สร้าง filter string ที่ผันตามสไลเดอร์
+drawBackMock()	จำลองตัดพื้นหลัง (มี alpha จริง)
+drawBlurMock()	เบลอ 6 รูปแบบ
+
+เบลอเฉพาะบางส่วน
+ช้ clip()— เหมือนเอากระดาษเจาะรูมาทาบแล้วพ่นสี
+ctx.filter = "blur(20px)";
+ctx.drawImage(img, ...);        // 1. เบลอทั้งภาพก่อน
+ctx.filter = "none";
+
+ctx.save();                     // 2. จำสถานะไว้
+ctx.beginPath();
+ctx.ellipse(...);               // 3. วาดวงรี = "รู" ที่จะพ่นผ่าน
+ctx.clip();                     // 4. ต่อไปนี้วาดได้เฉพาะในวงรี
+ctx.drawImage(img, ...);        // 5. ทับด้วยภาพคม → กลางชัด ขอบเบลอ
+ctx.restore();                  // 6. คืนสถานะ ยกเลิก clip
+)
