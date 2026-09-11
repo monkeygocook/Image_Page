@@ -48,6 +48,8 @@ const I18N = {
         "hint.mock": "⚠️ โหมดจำลอง — ยังไม่ได้ต่อหลังบ้านจริง",
         "hint.abort": "ยกเลิก / หมดเวลารอ",
         "hint.error": "ผิดพลาด: {msg}",
+        "hint.decodeFail": "อ่านไฟล์รูปไม่สำเร็จ ลองไฟล์อื่นดูครับ",
+        "hint.exportFail": "สร้างไฟล์ผลลัพธ์ไม่สำเร็จ",
         "settings.title": "ตั้งค่า", "settings.lang": "ภาษา",
         "settings.notes": "โน้ตส่วนตัว",
         "settings.notesPh": "จดไอเดีย prompt หรืออะไรก็ได้ที่นี่ — บันทึกอัตโนมัติ",
@@ -129,6 +131,8 @@ const I18N = {
         "hint.mock": "⚠️ Mock mode — backend not connected yet",
         "hint.abort": "Cancelled / timed out",
         "hint.error": "Error: {msg}",
+        "hint.decodeFail": "Could not read that image. Try another file.",
+        "hint.exportFail": "Could not build the result file",
         "settings.title": "Settings", "settings.lang": "Language",
         "settings.notes": "Personal notes",
         "settings.notesPh": "Jot down prompt ideas — saved automatically",
@@ -191,7 +195,7 @@ const I18N = {
 };
 
 /* ---------- แท็บทั้งหมด ---------- */
-const TAB_ORDER = ["genimage", "back", "icon", "tone"];
+const TAB_ORDER = ["genimage", "back", "icon", "tone", "blur"];
 
 const TAB_CONFIG = {
     genimage: {
@@ -274,6 +278,33 @@ const TAB_CONFIG = {
                 ],
             },
             strength: { kind: "range", label: { th: "ความเข้ม", en: "Strength" }, min: 0, max: 100, step: 5, default: 70, suffix: "%" },
+        },
+    },
+    blur: {
+        label: "Blur", type: "img2img",
+        usesPrompt: false, needsFile: true,
+        endpoint: "/api/v1/blur-image", contentType: "multipart/form-data",
+        cta: { th: "เบลอภาพ", en: "Apply Blur" },
+        hint: { th: "PNG / JPG / WEBP · ไม่เกิน 20 MB", en: "PNG / JPG / WEBP · max 20 MB" },
+        accept: ["image/png", "image/jpeg", "image/webp"], maxMB: 20,
+        /* PNG เพราะโหมดโมเสกมีขอบคม ถ้าใช้ JPEG จะเกิดรอยหยักรอบบล็อก */
+        returns: "image/png",
+        fields: {
+            blur_type: {
+                kind: "enum", label: { th: "รูปแบบการเบลอ", en: "Blur type" }, default: "gaussian",
+                values: [
+                    { v: "gaussian", th: "ทั้งภาพ", en: "Gaussian" },
+                    { v: "background", th: "เฉพาะพื้นหลัง", en: "Background" },
+                    { v: "face", th: "เฉพาะใบหน้า", en: "Face" },
+                    { v: "motion", th: "เคลื่อนไหว", en: "Motion" },
+                    { v: "pixelate", th: "โมเสก", en: "Pixelate" },
+                    { v: "radial", th: "รัศมี", en: "Radial" },
+                ],
+            },
+            blur_amount: {
+                kind: "range", label: { th: "ความเบลอ", en: "Blur amount" },
+                min: 0, max: 100, step: 5, default: 40, suffix: "%",
+            },
         },
     },
 };

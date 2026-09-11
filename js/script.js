@@ -1,6 +1,6 @@
 /* ============================================================
    script.js — ทั้งหมดของหน้าบ้าน (หน้าผู้ใช้ทั่วไป)
-   อัปเดต: 2026-09-08 (เพิ่ม role guard + ทางเข้าหน้าเจ้าหน้าที่)
+   อัปเดต: 2026-09-10 (เพิ่มแท็บ Blur + เปลี่ยน mock เป็น canvas baking)
    ============================================================ */
 const $ = (id) => document.getElementById(id);
 
@@ -111,9 +111,13 @@ function loadTabPrefs() {
     const saved = JSON.parse(localStorage.getItem(uKey("tabs")) || "null");
     const valid = saved?.filter((x) => TAB_CONFIG[x.id]);
     tabPrefs = valid?.length ? valid : TAB_ORDER.map((id) => ({ id, on: true }));
-    TAB_ORDER.forEach((id) => {                       // เผื่อเพิ่มแท็บใหม่ในอนาคต
-        if (!tabPrefs.some((x) => x.id === id)) tabPrefs.push({ id, on: true });
+
+    // เผื่อเพิ่มแท็บใหม่ในอนาคต — ผู้ใช้เก่าจะได้แท็บใหม่ต่อท้ายโดยอัตโนมัติ
+    let added = false;
+    TAB_ORDER.forEach((id) => {
+        if (!tabPrefs.some((x) => x.id === id)) { tabPrefs.push({ id, on: true }); added = true; }
     });
+    if (added) saveTabPrefs();   // เขียนกลับทันที จะได้ไม่ต้องเติมซ้ำทุกครั้งที่โหลดหน้า
 }
 const saveTabPrefs = () => localStorage.setItem(uKey("tabs"), JSON.stringify(tabPrefs));
 const visibleTabs = () => tabPrefs.filter((x) => x.on).map((x) => x.id);
@@ -326,7 +330,7 @@ function clearResult() {
     $("resultEmpty").hidden = false;
     $("compareToggleWrap").hidden = true;
     $("btnDownload").disabled = true;
-    $("resultImage").style.filter = $("soloImage").style.filter = "";
+    $("resultImage").style.filter = $("soloImage").style.filter = "";   // เผื่อไว้ ปัจจุบันไม่ได้ใช้แล้ว
 }
 
 function showResult(url, beforeSrc) {
@@ -491,25 +495,159 @@ async function realRequest(cfg, signal) {
     return URL.createObjectURL(await res.blob());
 }
 
-/* ---------- Mock ---------- */
+/* ============================================================
+   5.6 Mock — อบเอฟเฟกต์ลงภาพจริงด้วย canvas
+   ต่างจากเดิมที่ใช้ CSS filter (เห็นบนจอแต่ไฟล์ไม่เปลี่ยน)
+   วิธีนี้ได้ "ไฟล์ใหม่" เหมือนหลังบ้านส่งกลับมาจริง ๆ
+   ============================================================ */
+const MOCK_MAX_SIDE = 1600;   // ย่อภาพก่อนประมวลผล กันภาพใหญ่ทำเบราว์เซอร์ค้าง
+const MOCK_DELAY_MS = 700;    // หน่วงให้เห็นสปินเนอร์ เหมือนรอเซิร์ฟเวอร์จริง
+
+/** โหลด blob URL เข้า <img> เพื่อเอาไปวาดลง canvas */
+function loadImageEl(src) {
+    return new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error(t("hint.decodeFail")));
+        im.src = src;
+    });
+}
+
+/** แปลง canvas เป็น blob URL ตาม MIME ที่ config กำหนดไว้ */
+function canvasToBlobURL(cv, mime) {
+    return new Promise((resolve, reject) => {
+        cv.toBlob(
+            (blob) => (blob ? resolve(URL.createObjectURL(blob)) : reject(new Error(t("hint.exportFail")))),
+            mime || "image/png",
+            0.92
+        );
+    });
+}
+
+/** แท็บ Tone — สร้าง CSS filter string ที่ผันตามสไลเดอร์ความเข้ม */
+function toneFilter() {
+    const s = Math.min(1, Math.max(0, Number(optionState.strength ?? 70) / 100));
+    return {
+        warm: `sepia(${0.55 * s}) saturate(${1 + 0.45 * s})`,
+        cool: `hue-rotate(${200 * s}deg) saturate(${1 + 0.25 * s})`,
+        pastel: `saturate(${1 - 0.45 * s}) brightness(${1 + 0.12 * s})`,
+        mono: `grayscale(${s})`,
+        vivid: `saturate(${1 + 0.9 * s}) contrast(${1 + 0.25 * s})`,
+        cinematic: `contrast(${1 + 0.35 * s}) sepia(${0.35 * s}) saturate(${1 - 0.1 * s})`,
+    }[optionState.tone] || "none";
+}
+
+/** แท็บ Back — จำลองการตัดพื้นหลัง (ของจริงใช้โมเดล segmentation) */
+function drawBackMock(ctx, img, w, h) {
+    const out = optionState.output || "transparent";
+    if (out !== "transparent") {
+        ctx.fillStyle = out === "white" ? "#ffffff" : "#000000";
+        ctx.fillRect(0, 0, w, h);
+    }
+    // ตัดวงรีกลางภาพออกมา สมมติว่าเป็นตัวแบบ
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(w / 2, h * 0.52, w * 0.32, h * 0.44, 0, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+}
+
+/** แท็บ Blur — เบลอ 6 รูปแบบ ผันตามสไลเดอร์ความเบลอ */
+function drawBlurMock(ctx, img, w, h) {
+    const amt = Math.min(100, Math.max(0, Number(optionState.blur_amount ?? 40)));
+    const px = Math.max(1, Math.round((amt / 100) * 26));   // 0–100% → 1–26 px
+    const type = optionState.blur_type || "gaussian";
+    const over = px + 2;   // วาดล้นขอบ กันขอบภาพจางจากการเบลอ
+
+    /* --- โมเสก: ย่อจิ๋วแล้วขยายกลับโดยปิดการไล่สี --- */
+    if (type === "pixelate") {
+        const factor = Math.max(2, Math.round(amt / 2) + 2);
+        const tw = Math.max(1, Math.round(w / factor));
+        const th = Math.max(1, Math.round(h / factor));
+        const tmp = document.createElement("canvas");
+        tmp.width = tw; tmp.height = th;
+        tmp.getContext("2d").drawImage(img, 0, 0, tw, th);
+        ctx.imageSmoothingEnabled = false;      // ← หัวใจของโมเสก
+        ctx.drawImage(tmp, 0, 0, w, h);
+        ctx.imageSmoothingEnabled = true;
+        return;
+    }
+
+    /* --- เคลื่อนไหว: ซ้อนภาพเลื่อนทีละนิดแบบโปร่งแสง --- */
+    if (type === "motion") {
+        const steps = 14;
+        const span = px * 2;
+        ctx.globalAlpha = 1 / steps;
+        for (let i = 0; i < steps; i++) {
+            const dx = (i / (steps - 1) - 0.5) * span;
+            ctx.drawImage(img, dx, 0, w, h);
+        }
+        ctx.globalAlpha = 1;
+        return;
+    }
+
+    /* --- ใบหน้า: ภาพคมทั้งใบ แล้วเบลอเฉพาะวงรีตำแหน่งใบหน้า --- */
+    if (type === "face") {
+        ctx.drawImage(img, 0, 0, w, h);
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(w / 2, h * 0.30, w * 0.17, h * 0.22, 0, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.filter = `blur(${Math.max(8, px)}px)`;   // ปิดบังใบหน้าต้องเบลอแรงพอ
+        ctx.drawImage(img, -over, -over, w + over * 2, h + over * 2);
+        ctx.filter = "none";
+        ctx.restore();
+        return;
+    }
+
+    /* --- ที่เหลือ: เบลอทั้งภาพก่อน --- */
+    ctx.filter = `blur(${px}px)`;
+    ctx.drawImage(img, -over, -over, w + over * 2, h + over * 2);
+    ctx.filter = "none";
+    if (type === "gaussian") return;
+
+    /* --- พื้นหลัง / รัศมี: คืนความคมให้บริเวณตรงกลาง --- */
+    ctx.save();
+    ctx.beginPath();
+    if (type === "background") ctx.ellipse(w / 2, h * 0.52, w * 0.30, h * 0.42, 0, 0, Math.PI * 2);
+    else ctx.arc(w / 2, h / 2, Math.min(w, h) * 0.34, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+}
+
 async function mockRequest(cfg) {
-    await new Promise((r) => setTimeout(r, 1200));
+    await new Promise((r) => setTimeout(r, MOCK_DELAY_MS));
+
+    /* GenImage ยังไม่มีรูปต้นทาง → ใช้ภาพตัวอย่างจากอินเทอร์เน็ต
+       ".png" สำคัญมาก ถ้าไม่ใส่ placehold.co จะส่ง SVG มาให้ */
     if (cfg.type === "text2img") {
         const [w, h] = (optionState.size || "1024x1024").split("x");
-        // ".png" สำคัญมาก — ถ้าไม่ใส่ placehold.co จะส่ง SVG มาให้ (ค่าเริ่มต้นของบริการ)
         return `https://placehold.co/${w}x${h}/1f2937/94a3b8.png?text=MOCK+GenImage`;
     }
-    const filters = {
-        back: "contrast(1.12) drop-shadow(0 0 1px #000)",
-        icon: "saturate(1.06) blur(.3px)",
-        tone: {
-            warm: "sepia(.4) saturate(1.3)", cool: "hue-rotate(190deg) saturate(1.1)",
-            pastel: "saturate(.7) brightness(1.08)", mono: "grayscale(1)",
-            vivid: "saturate(1.6) contrast(1.1)", cinematic: "contrast(1.25) sepia(.2)"
-        }[optionState.tone],
-    };
-    $("resultImage").style.filter = $("soloImage").style.filter = filters[currentTab] || "none";
-    return previewURL();          // ใช้ URL เดียวกับ thumb — registry กันลบซ้ำให้แล้ว
+
+    const img = await loadImageEl(previewURL());
+    const long = Math.max(img.naturalWidth, img.naturalHeight) || 1;
+    const scale = Math.min(1, MOCK_MAX_SIDE / long);
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+
+    const cv = document.createElement("canvas");
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext("2d");
+
+    if (currentTab === "blur") drawBlurMock(ctx, img, w, h);
+    else if (currentTab === "back") drawBackMock(ctx, img, w, h);
+    else {
+        // icon = ลบนอยส์แล้วภาพเนียนขึ้นเล็กน้อย · tone = ตามชิป + สไลเดอร์
+        ctx.filter = currentTab === "tone" ? toneFilter() : "saturate(1.06) contrast(1.04) blur(0.4px)";
+        ctx.drawImage(img, 0, 0, w, h);
+        ctx.filter = "none";
+    }
+
+    return canvasToBlobURL(cv, cfg.returns);
 }
 
 /* ============================================================
