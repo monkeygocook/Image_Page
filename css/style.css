@@ -8,6 +8,7 @@
     --brand-2: #818cf8;
     --warn: #f59e0b;
     --danger: #dc2626;
+    --ok: #16a34a;
     --r: 14px;
     --shadow: 0 2px 12px rgba(15, 23, 42, .07);
 }
@@ -100,6 +101,65 @@ body.locked #btnMenu {
 .role-tag.staff {
     background: #fef3c7;
     color: #92400e
+}
+
+/* ---------- ป้ายสถานะการเชื่อมต่อ ---------- */
+.conn-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 0;
+    border-radius: 999px;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    background: rgba(255, 255, 255, .8);
+    color: #1e293b;
+    white-space: nowrap;
+    transition: background .15s
+}
+
+.conn-badge:hover {
+    background: #fff
+}
+
+.conn-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex: 0 0 auto
+}
+
+.conn-badge.mock .conn-dot {
+    background: var(--warn)
+}
+
+.conn-badge.ok .conn-dot {
+    background: var(--ok)
+}
+
+.conn-badge.down .conn-dot {
+    background: var(--danger)
+}
+
+.conn-badge.checking .conn-dot {
+    background: var(--brand-2);
+    animation: pulse 1s ease-in-out infinite
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1
+    }
+
+    50% {
+        opacity: .25
+    }
 }
 
 /* ---------- แถบ MOCK ---------- */
@@ -465,8 +525,15 @@ select:focus {
     color: var(--muted)
 }
 
+/* ---------- ปุ่มสั่งงาน + ยกเลิก ---------- */
+.submit-row {
+    display: flex;
+    gap: 10px;
+    align-items: stretch
+}
+
 .cta {
-    width: 100%;
+    flex: 1;
     border: 0;
     border-radius: 12px;
     padding: 14px;
@@ -484,10 +551,17 @@ select:focus {
 
 .cta.as-link {
     display: inline-block;
+    flex: none;
     width: auto;
     padding: 12px 28px;
     text-decoration: none;
     margin-top: 16px
+}
+
+.cancel-btn {
+    flex: 0 0 auto;
+    padding: 14px 22px;
+    font-weight: 600
 }
 
 /* ---------- Result ---------- */

@@ -16,6 +16,9 @@
         <nav class="tabbar" id="tabBar"></nav>
         <button id="btnTabs" class="icon-btn" title="จัดการแท็บ">✏️</button>
         <div class="spacer"></div>
+        <button type="button" id="connBadge" class="conn-badge checking">
+            <span class="conn-dot"></span><span id="connText"></span>
+        </button>
         <button id="btnAccount" class="avatar-btn" title="บัญชี"><span id="avatarText">?</span></button>
         <button id="btnMenu" class="icon-btn" title="เมนู">☰</button>
 
@@ -61,7 +64,11 @@
             <section id="optionsGroup" class="group options"></section>
 
             <p id="hint" class="hint"></p>
-            <button type="submit" id="submitBtn" class="cta">—</button>
+            <div class="submit-row">
+                <button type="submit" id="submitBtn" class="cta">—</button>
+                <button type="button" id="btnCancel" class="ghost danger cancel-btn" hidden
+                    data-i18n="result.cancel"></button>
+            </div>
         </form>
 
         <aside class="panel result">
@@ -153,6 +160,7 @@
     </div>
 
     <script src="js/config.js" defer></script>
+    <script src="/js/api.js" defer></script>
     <script src="js/script.js" defer></script>
 </body>
 

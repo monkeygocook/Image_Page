@@ -1,12 +1,44 @@
 /* ============================================================
    config.js — Single Source of Truth
-   ทีมหลังบ้าน: อ่านไฟล์นี้ไฟล์เดียวพอ
+   ทีมหลังบ้าน: อ่านไฟล์นี้ไฟล์เดียวพอ ทุก endpoint และ field อยู่ที่นี่
    ============================================================ */
 
-const API_BASE = `http://${location.hostname}:7860`;
-const USE_MOCK = true;              // ⚠️ เปลี่ยนเป็น false เมื่อหลังบ้านพร้อม
-const REQUEST_TIMEOUT = 120000;     // 2 นาที
+/* ---------- ปลายทาง API ---------- */
+// แก้จาก 127.0.0.1 หรือ localhost ให้เป็น IP ของเครื่องคุณจริงๆ
+const API_BASE = "http://10.192.0.112:7860";
+
+
+/* โหมดการทำงาน:
+   "mock" = ใช้ข้อมูลจำลองเสมอ (พัฒนา UI)
+   "live" = ยิง Backend จริงเสมอ (production)
+   "auto" = ตรวจ /health ตอนเปิดหน้า เจอก็ใช้จริง ไม่เจอก็ถอยไป mock  ← แนะนำตอนนี้ */
+const API_MODE = "auto";
+
+const REQUEST_TIMEOUT = 120000;     // เวลารอสูงสุดต่อ 1 request (2 นาที)
+const HEALTH_TIMEOUT = 4000;        // ตรวจสุขภาพเซิร์ฟเวอร์ ต้องตอบเร็ว
+const HEALTH_INTERVAL = 30000;      // ตรวจซ้ำทุก 30 วินาที (เฉพาะโหมด live)
+const NET_RETRY = 1;                // ลองซ้ำกี่ครั้งเมื่อเน็ตสะดุด (เฉพาะ GET)
+const MOCK_DELAY_MS = 1200;         // หน่วงจำลองเวลาประมวลผล
+const MOCK_MAX_SIDE = 1600;         // ย่อภาพก่อนประมวลผลใน mock กันเบราว์เซอร์ค้าง
+
 const STORE = "imgstudio:";         // prefix ของ localStorage
+
+/* ---------- รายการ endpoint ทั้งหมด ---------- */
+const ENDPOINTS = {
+    health: "/api/v1/health",
+
+    register: "/api/v1/auth/register",
+    login: "/api/v1/auth/login",
+    me: "/api/v1/auth/me",
+    logout: "/api/v1/auth/logout",
+
+    notes: "/api/v1/notes",
+    preferences: "/api/v1/preferences",
+
+    adminUsers: "/api/v1/admin/users",
+    adminUserRole: (id) => `/api/v1/admin/users/${encodeURIComponent(id)}/role`,
+    adminUser: (id) => `/api/v1/admin/users/${encodeURIComponent(id)}`,
+};
 
 /* ---------- การควบคุมการเข้าถึง ---------- */
 const REQUIRE_AUTH = true;          // true = ต้องล็อกอินก่อนใช้งานทุกฟังก์ชัน
@@ -32,6 +64,11 @@ const I18N = {
         "nav.login": "เข้าสู่ระบบ", "nav.logout": "ออกจากระบบ", "nav.guest": "ยังไม่ได้เข้าสู่ระบบ",
         "nav.admin": "หน้าเจ้าหน้าที่",
         "role.user": "ผู้ใช้ทั่วไป", "role.staff": "เจ้าหน้าที่",
+
+        "conn.mock": "จำลอง", "conn.online": "เชื่อมต่อแล้ว",
+        "conn.offline": "ออฟไลน์", "conn.checking": "กำลังตรวจ...",
+        "conn.tip": "คลิกเพื่อตรวจสอบการเชื่อมต่อใหม่",
+
         "prompt.clear": "ล้าง Prompt",
         "prompt.ph": "Prompt\n(อธิบายภาพที่ต้องการ...)",
         "negative.ph": "Negative Prompt\n(สิ่งที่ไม่ต้องการให้มี...)",
@@ -41,27 +78,53 @@ const I18N = {
         "result.loading": "กำลังประมวลผล...",
         "result.download": "ดาวน์โหลด", "result.compare": "เทียบก่อน-หลัง",
         "result.before": "ก่อน", "result.after": "หลัง",
+        "result.cancel": "ยกเลิก",
+
         "hint.needPrompt": "กรุณาใส่ Prompt ก่อนกด Generate",
         "hint.needFile": "กรุณาเลือกรูปก่อนครับ",
         "hint.badType": "ไฟล์ต้องเป็น PNG / JPG / WEBP เท่านั้น",
         "hint.tooLarge": "ไฟล์ใหญ่เกิน {n} MB",
         "hint.mock": "⚠️ โหมดจำลอง — ยังไม่ได้ต่อหลังบ้านจริง",
-        "hint.abort": "ยกเลิก / หมดเวลารอ",
+        "hint.abort": "ยกเลิกแล้ว",
         "hint.error": "ผิดพลาด: {msg}",
-        "hint.decodeFail": "อ่านไฟล์รูปไม่สำเร็จ ลองไฟล์อื่นดูครับ",
-        "hint.exportFail": "สร้างไฟล์ผลลัพธ์ไม่สำเร็จ",
+        "hint.reqId": " (รหัสอ้างอิง: {id})",
+
+        /* ---------- ข้อความผิดพลาดจาก API ---------- */
+        "err.NETWORK": "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่าหลังบ้านเปิดอยู่หรือไม่",
+        "err.TIMEOUT": "เซิร์ฟเวอร์ใช้เวลานานเกินไป ลองใหม่อีกครั้ง",
+        "err.UNAUTHORIZED": "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่",
+        "err.FORBIDDEN": "บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้",
+        "err.NOT_FOUND": "ไม่พบข้อมูลที่ต้องการ",
+        "err.VALIDATION_ERROR": "ข้อมูลที่ส่งไปไม่ถูกต้อง",
+        "err.INVALID_FILE_TYPE": "ไฟล์ต้องเป็น PNG / JPG / WEBP เท่านั้น",
+        "err.FILE_TOO_LARGE": "ไฟล์ใหญ่เกินกำหนด",
+        "err.UNPROCESSABLE_IMAGE": "อ่านไฟล์รูปไม่สำเร็จ ลองไฟล์อื่นดูครับ",
+        "err.EXPORT_FAILED": "สร้างไฟล์ผลลัพธ์ไม่สำเร็จ",
+        "err.RATE_LIMITED": "ใช้งานถี่เกินไป กรุณารอสักครู่แล้วลองใหม่",
+        "err.INTERNAL_ERROR": "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่",
+        "err.MODEL_UNAVAILABLE": "โมเดลยังโหลดไม่เสร็จ กรุณารอสักครู่",
+        "err.EMAIL_TAKEN": "อีเมลนี้ถูกใช้แล้ว",
+        "err.INVALID_CREDENTIALS": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+        "err.SELF_FORBIDDEN": "ไม่สามารถแก้สิทธิ์หรือลบบัญชีของตัวเองได้",
+        "err.LAST_STAFF": "ต้องเหลือเจ้าหน้าที่อย่างน้อย 1 คนในระบบ",
+        "err.UNKNOWN": "เกิดข้อผิดพลาดที่ไม่รู้จัก",
+
         "settings.title": "ตั้งค่า", "settings.lang": "ภาษา",
         "settings.notes": "โน้ตส่วนตัว",
         "settings.notesPh": "จดไอเดีย prompt หรืออะไรก็ได้ที่นี่ — บันทึกอัตโนมัติ",
         "settings.saved": "บันทึกแล้ว", "settings.reset": "ล้างข้อมูลทั้งหมด",
         "settings.resetOk": "ล้างข้อมูลเรียบร้อย",
+        "settings.syncFail": "บันทึกขึ้นเซิร์ฟเวอร์ไม่สำเร็จ (เก็บไว้ในเครื่องแล้ว)",
+
         "tabs.title": "จัดการแท็บ",
         "tabs.desc": "เลือกแท็บที่ต้องการแสดง และเรียงลำดับได้ตามใจ",
         "tabs.min": "ต้องเปิดไว้อย่างน้อย 1 แท็บ",
+
         "gate.desc": "ต้องเข้าสู่ระบบก่อน จึงจะใช้งานฟังก์ชันต่าง ๆ ได้",
         "auth.title": "เข้าสู่ระบบ", "auth.titleReg": "สมัครสมาชิก",
         "auth.name": "ชื่อที่แสดง", "auth.email": "อีเมล", "auth.pass": "รหัสผ่าน",
         "auth.login": "เข้าสู่ระบบ", "auth.register": "สมัครสมาชิก",
+        "auth.working": "กำลังดำเนินการ...",
         "auth.toReg": "ยังไม่มีบัญชี? สมัครเลย", "auth.toLogin": "มีบัญชีแล้ว? เข้าสู่ระบบ",
         "auth.required": "🔒 กรุณาเข้าสู่ระบบก่อนใช้งาน",
         "auth.expired": "เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่",
@@ -69,9 +132,6 @@ const I18N = {
         "auth.errEmail": "รูปแบบอีเมลไม่ถูกต้อง",
         "auth.errShort": "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร",
         "auth.errWeak": "รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข",
-        "auth.errExists": "อีเมลนี้ถูกใช้แล้ว",
-        "auth.errNoUser": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
-        "auth.errPass": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
         "auth.welcome": "ยินดีต้อนรับ {name}",
         "auth.mockNote": "🧪 บัญชีเก็บในเครื่องนี้เท่านั้น (mock) ยังไม่ได้ต่อหลังบ้าน",
         "auth.seedNote": "🔑 บัญชีเจ้าหน้าที่ทดสอบ — {email} / {pass}",
@@ -92,6 +152,8 @@ const I18N = {
         "admin.statSize": "พื้นที่ที่ใช้",
         "admin.search": "ค้นหาชื่อหรืออีเมล...",
         "admin.export": "ส่งออก JSON",
+        "admin.refresh": "โหลดใหม่",
+        "admin.loading": "กำลังโหลดข้อมูล...",
         "admin.colName": "ชื่อ",
         "admin.colEmail": "อีเมล",
         "admin.colRole": "สิทธิ์",
@@ -106,8 +168,6 @@ const I18N = {
         "admin.msgRole": "เปลี่ยนสิทธิ์ {email} เป็น “{role}” เรียบร้อย",
         "admin.msgDeleted": "ลบบัญชี {email} เรียบร้อย",
         "admin.msgExport": "ส่งออกข้อมูลแล้ว (ไม่รวมรหัสผ่าน)",
-        "admin.errSelf": "ไม่สามารถแก้สิทธิ์หรือลบบัญชีของตัวเองได้",
-        "admin.errLastStaff": "ต้องเหลือเจ้าหน้าที่อย่างน้อย 1 คนในระบบ",
     },
     en: {
         "app.title": "AI Image Studio",
@@ -115,6 +175,11 @@ const I18N = {
         "nav.login": "Sign in", "nav.logout": "Sign out", "nav.guest": "Not signed in",
         "nav.admin": "Staff console",
         "role.user": "User", "role.staff": "Staff",
+
+        "conn.mock": "Mock", "conn.online": "Connected",
+        "conn.offline": "Offline", "conn.checking": "Checking...",
+        "conn.tip": "Click to re-check the connection",
+
         "prompt.clear": "Clear prompt",
         "prompt.ph": "Prompt\n(Describe the image you want...)",
         "negative.ph": "Negative Prompt\n(Describe what you don't want...)",
@@ -124,27 +189,52 @@ const I18N = {
         "result.loading": "Processing...",
         "result.download": "Download", "result.compare": "Compare",
         "result.before": "Before", "result.after": "After",
+        "result.cancel": "Cancel",
+
         "hint.needPrompt": "Please enter a prompt first",
         "hint.needFile": "Please choose an image first",
         "hint.badType": "Only PNG / JPG / WEBP are allowed",
         "hint.tooLarge": "File exceeds {n} MB",
         "hint.mock": "⚠️ Mock mode — backend not connected yet",
-        "hint.abort": "Cancelled / timed out",
+        "hint.abort": "Cancelled",
         "hint.error": "Error: {msg}",
-        "hint.decodeFail": "Could not read that image. Try another file.",
-        "hint.exportFail": "Could not build the result file",
+        "hint.reqId": " (request id: {id})",
+
+        "err.NETWORK": "Cannot reach the server. Is the backend running?",
+        "err.TIMEOUT": "The server took too long. Please try again.",
+        "err.UNAUTHORIZED": "Your session expired. Please sign in again.",
+        "err.FORBIDDEN": "Your account is not allowed to do that.",
+        "err.NOT_FOUND": "The requested resource was not found.",
+        "err.VALIDATION_ERROR": "The data sent was invalid.",
+        "err.INVALID_FILE_TYPE": "Only PNG / JPG / WEBP are allowed",
+        "err.FILE_TOO_LARGE": "File exceeds the size limit",
+        "err.UNPROCESSABLE_IMAGE": "Could not read that image. Try another file.",
+        "err.EXPORT_FAILED": "Could not build the result file",
+        "err.RATE_LIMITED": "Too many requests. Please wait a moment.",
+        "err.INTERNAL_ERROR": "Server error. Please try again.",
+        "err.MODEL_UNAVAILABLE": "The model is still loading. Please wait.",
+        "err.EMAIL_TAKEN": "That email is already registered",
+        "err.INVALID_CREDENTIALS": "Incorrect email or password",
+        "err.SELF_FORBIDDEN": "You cannot change or delete your own account",
+        "err.LAST_STAFF": "At least one staff account must remain",
+        "err.UNKNOWN": "An unknown error occurred",
+
         "settings.title": "Settings", "settings.lang": "Language",
         "settings.notes": "Personal notes",
         "settings.notesPh": "Jot down prompt ideas — saved automatically",
         "settings.saved": "Saved", "settings.reset": "Clear all data",
         "settings.resetOk": "All data cleared",
+        "settings.syncFail": "Could not sync to server (saved locally)",
+
         "tabs.title": "Manage tabs",
         "tabs.desc": "Choose which tabs to show and reorder them.",
         "tabs.min": "At least one tab must stay visible",
+
         "gate.desc": "You must sign in before using any feature.",
         "auth.title": "Sign in", "auth.titleReg": "Create account",
         "auth.name": "Display name", "auth.email": "Email", "auth.pass": "Password",
         "auth.login": "Sign in", "auth.register": "Create account",
+        "auth.working": "Working...",
         "auth.toReg": "No account? Sign up", "auth.toLogin": "Have an account? Sign in",
         "auth.required": "🔒 Please sign in to continue",
         "auth.expired": "Your session has expired. Please sign in again.",
@@ -152,16 +242,12 @@ const I18N = {
         "auth.errEmail": "Invalid email format",
         "auth.errShort": "Password must be at least 8 characters",
         "auth.errWeak": "Password must contain both letters and numbers",
-        "auth.errExists": "That email is already registered",
-        "auth.errNoUser": "Incorrect email or password",
-        "auth.errPass": "Incorrect email or password",
         "auth.welcome": "Welcome, {name}",
         "auth.mockNote": "🧪 Accounts are stored locally (mock) — no backend yet",
         "auth.seedNote": "🔑 Demo staff account — {email} / {pass}",
         "badge.mock": "🧪 MOCK MODE — backend not connected",
         "common.close": "Close", "common.cancel": "Cancel",
 
-        /* ---------- Staff console ---------- */
         "admin.title": "Staff Console",
         "admin.subtitle": "Manage user accounts and access rights",
         "admin.back": "Back to app",
@@ -175,6 +261,8 @@ const I18N = {
         "admin.statSize": "Storage used",
         "admin.search": "Search name or email...",
         "admin.export": "Export JSON",
+        "admin.refresh": "Reload",
+        "admin.loading": "Loading...",
         "admin.colName": "Name",
         "admin.colEmail": "Email",
         "admin.colRole": "Role",
@@ -189,8 +277,6 @@ const I18N = {
         "admin.msgRole": "Changed role of {email} to “{role}”",
         "admin.msgDeleted": "Deleted account {email}",
         "admin.msgExport": "Exported (password hashes excluded)",
-        "admin.errSelf": "You cannot change or delete your own account",
-        "admin.errLastStaff": "At least one staff account must remain",
     },
 };
 

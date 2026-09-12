@@ -1,6 +1,9 @@
 /* ============================================================
-   script.js — ทั้งหมดของหน้าบ้าน (หน้าผู้ใช้ทั่วไป)
-   อัปเดต: 2026-09-10 (เพิ่มแท็บ Blur + เปลี่ยน mock เป็น canvas baking)
+   script.js — ส่วนติดต่อผู้ใช้ของหน้าหลัก
+   อัปเดต: 2026-09-11 (ย้ายทุกการเชื่อมต่อไป api.js + ปุ่มยกเลิก + ป้ายสถานะ)
+
+   ⚠️ ไฟล์นี้ห้ามเรียก fetch() หรือแตะ localStorage ของข้อมูลธุรกิจโดยตรง
+      ทุกอย่างต้องผ่าน Api.*
    ============================================================ */
 const $ = (id) => document.getElementById(id);
 
@@ -16,7 +19,6 @@ const Blobs = (() => {
     const api = {
         set(slot, url) {
             const old = slots.get(slot);
-            // revoke เฉพาะเมื่อ: เป็น blob จริง + ไม่มี slot อื่นใช้อยู่
             if (old && old !== url && isBlob(old) && !sharedWith(old, slot)) URL.revokeObjectURL(old);
             url ? slots.set(slot, url) : slots.delete(slot);
             return url ?? null;
@@ -32,35 +34,19 @@ const Blobs = (() => {
 
 window.addEventListener("pagehide", () => Blobs.clearAll());
 window.__blobs = Blobs.debug;   // เปิด console พิมพ์ __blobs() ดูได้ว่าค้างกี่ตัว
+window.__api = () => ({ mode: Api.mode(), online: Api.isOnline(), base: Api.base(), reqId: Api.lastRequestId() });
 
 /* ============================================================
-   0.5 อ่าน session พร้อมตรวจวันหมดอายุ
-   ============================================================ */
-let sessionExpired = false;
-
-function loadSession() {
-    const raw = JSON.parse(localStorage.getItem(STORE + "session") || "null");
-    if (!raw) return null;
-    // exp = เวลาหมดอายุ (ms) — เลียนแบบ exp claim ของ JWT
-    if (typeof raw.exp === "number" && Date.now() > raw.exp) {
-        localStorage.removeItem(STORE + "session");
-        localStorage.removeItem(STORE + "token");
-        sessionExpired = true;
-        return null;
-    }
-    return raw;
-}
-
-/* ============================================================
-   State — ไม่มีตัวแปรเก็บ URL แล้ว ใช้ getter อ่านจาก Blobs อย่างเดียว
+   State
    ============================================================ */
 let lang = localStorage.getItem(STORE + "lang") || "th";
-let user = loadSession();
+let user = Api.Session.load();
 let currentTab = null;
 let currentFile = null;
 let optionState = {};
 let tabPrefs = null;
 let authMode = "login";
+let inflight = null;            // AbortController ของงานที่กำลังทำอยู่
 
 const previewURL = () => Blobs.get("preview");
 const resultURL = () => Blobs.get("result");
@@ -83,6 +69,16 @@ const t = (k, vars = {}) =>
     (I18N[lang][k] || k).replace(/\{(\w+)\}/g, (_, n) => vars[n] ?? "");
 const L = (o) => (typeof o === "string" ? o : o?.[lang] ?? "");
 
+/** แปลง ApiError เป็นข้อความที่ผู้ใช้อ่านรู้เรื่อง */
+function errMsg(err) {
+    if (!err) return t("err.UNKNOWN");
+    const key = "err." + (err.code || "UNKNOWN");
+    let msg = I18N[lang][key] || err.message || t("err.UNKNOWN");
+    if (err.code === "RATE_LIMITED" && err.retryAfter) msg += ` (${err.retryAfter}s)`;
+    if (err.requestId) msg += t("hint.reqId", { id: err.requestId });
+    return msg;
+}
+
 function applyI18n() {
     document.documentElement.lang = lang;
     document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
@@ -94,33 +90,88 @@ function applyI18n() {
     $("popRole").textContent = user ? t("role." + (user.role || "user")) : "";
     $("popRole").hidden = !user;
     $("popRole").classList.toggle("staff", isStaff());
-    $("popAdmin").hidden = !isStaff();               // เมนูเจ้าหน้าที่โผล่เฉพาะ staff
+    $("popAdmin").hidden = !isStaff();
     $("avatarText").textContent = user ? user.name.slice(0, 1).toUpperCase() : "?";
-    if (!$("authModal").hidden) openAuth(authMode);   // แปลข้อความในกล่องล็อกอินด้วย
+    if (!$("authModal").hidden) openAuth(authMode);
+    updateConn();
     renderTabBar();
     if (currentTab) switchTab(currentTab, true);
 }
 
-/* ---------- Storage ต่อผู้ใช้ ---------- */
-const uKey = (k) => `${STORE}${user ? user.email : "guest"}:${k}`;
+/* ============================================================
+   0.5 ป้ายสถานะการเชื่อมต่อ
+   ============================================================ */
+function updateConn() {
+    const el = $("connBadge");
+    if (!el) return;
+    const mock = Api.isMock();
+    const ok = Api.isOnline();
+    el.classList.toggle("mock", mock);
+    el.classList.toggle("ok", !mock && ok);
+    el.classList.toggle("down", !mock && !ok);
+    el.classList.toggle("checking", !Api.isReady());
+    $("connText").textContent = !Api.isReady()
+        ? t("conn.checking")
+        : mock ? t("conn.mock") : (ok ? t("conn.online") : t("conn.offline"));
+    el.title = `${t("conn.tip")}\n${Api.base()}`;
+}
+
+Api.onStatus(updateConn);
+Api.onUnauthorized(() => {                 // token หมดอายุระหว่างใช้งาน
+    user = null;
+    applyI18n();
+    refreshAuthState();
+    $("authErr").textContent = t("auth.expired");
+});
+
+$("connBadge").onclick = async () => {
+    $("connBadge").classList.add("checking");
+    $("connText").textContent = t("conn.checking");
+    await Api.ping();
+    updateConn();
+};
 
 /* ============================================================
    1. Tab bar + ตัวจัดการแท็บ (ดินสอ)
    ============================================================ */
+const uTabKey = () => `${STORE}${user ? user.email : "guest"}:tabs`;
+
 function loadTabPrefs() {
-    const saved = JSON.parse(localStorage.getItem(uKey("tabs")) || "null");
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(uTabKey()) || "null"); } catch { }
     const valid = saved?.filter((x) => TAB_CONFIG[x.id]);
     tabPrefs = valid?.length ? valid : TAB_ORDER.map((id) => ({ id, on: true }));
 
-    // เผื่อเพิ่มแท็บใหม่ในอนาคต — ผู้ใช้เก่าจะได้แท็บใหม่ต่อท้ายโดยอัตโนมัติ
+    // เผื่อเพิ่มแท็บใหม่ในอนาคต — ผู้ใช้เก่าจะได้แท็บใหม่ต่อท้ายอัตโนมัติ
     let added = false;
     TAB_ORDER.forEach((id) => {
         if (!tabPrefs.some((x) => x.id === id)) { tabPrefs.push({ id, on: true }); added = true; }
     });
-    if (added) saveTabPrefs();   // เขียนกลับทันที จะได้ไม่ต้องเติมซ้ำทุกครั้งที่โหลดหน้า
+    if (added) saveTabPrefs();
 }
-const saveTabPrefs = () => localStorage.setItem(uKey("tabs"), JSON.stringify(tabPrefs));
+
+function saveTabPrefs() {
+    localStorage.setItem(uTabKey(), JSON.stringify(tabPrefs));   // เขียนในเครื่องก่อน (ตอบสนองทันที)
+    if (Api.isLive()) Api.user.savePreferences({ lang, tabs: tabPrefs }).catch(() => { });
+}
+
 const visibleTabs = () => tabPrefs.filter((x) => x.on).map((x) => x.id);
+
+/** ดึงการตั้งค่าจากเซิร์ฟเวอร์มาทับของในเครื่อง (โหมด live เท่านั้น) */
+async function pullPrefs() {
+    if (!Api.isLive() || !user) return;
+    try {
+        const p = await Api.user.getPreferences();
+        if (p.lang && p.lang !== lang) { lang = p.lang; $("langSelect").value = lang; }
+        if (Array.isArray(p.tabs) && p.tabs.length) {
+            tabPrefs = p.tabs.filter((x) => TAB_CONFIG[x.id]);
+            TAB_ORDER.forEach((id) => {
+                if (!tabPrefs.some((x) => x.id === id)) tabPrefs.push({ id, on: true });
+            });
+        }
+        applyI18n();
+    } catch { /* ดึงไม่ได้ก็ใช้ของในเครื่องต่อไป */ }
+}
 
 function renderTabBar() {
     const bar = $("tabBar");
@@ -148,10 +199,7 @@ function renderTabManager() {
       <button type="button" class="mini" ${i === 0 ? "disabled" : ""}>↑</button>
       <button type="button" class="mini" ${i === tabPrefs.length - 1 ? "disabled" : ""}>↓</button>`;
         const [chk, , up, down] = li.children;
-        chk.onchange = () => {
-            item.on = chk.checked;
-            commitTabs();
-        };
+        chk.onchange = () => { item.on = chk.checked; commitTabs(); };
         up.onclick = () => { [tabPrefs[i - 1], tabPrefs[i]] = [tabPrefs[i], tabPrefs[i - 1]]; commitTabs(); };
         down.onclick = () => { [tabPrefs[i + 1], tabPrefs[i]] = [tabPrefs[i], tabPrefs[i + 1]]; commitTabs(); };
         ul.appendChild(li);
@@ -169,28 +217,24 @@ function commitTabs() {
 /* ============================================================
    2. switchTab + renderOptions + สถานะล็อก
    ============================================================ */
-
-/** ชั้นที่ 1+2: เบลอหน้าจอ และปิดการใช้งานทุก control เมื่อยังไม่ล็อกอิน */
 function applyLockState() {
     const locked = authRequired();
     const cfg = currentTab ? TAB_CONFIG[currentTab] : null;
 
     document.body.classList.toggle("locked", locked);
 
-    // ช่อง prompt: ต้องทั้ง "ไม่ล็อก" และ "แท็บนี้ใช้ prompt" ถึงจะพิมพ์ได้
     [$("promptInput"), $("negativeInput")].forEach(
         (el) => (el.disabled = locked || !cfg?.usesPrompt)
     );
     $("clearPrompt").disabled = locked;
     $("fileInput").disabled = locked;
     $("btnClearFile").disabled = locked;
-    $("submitBtn").disabled = locked;
+    $("submitBtn").disabled = locked || !!inflight;
     $("btnDownload").disabled = locked || !resultURL();
     $("dropZone").setAttribute("aria-disabled", String(locked));
     $("authClose").hidden = locked;   // ล็อกอยู่ = ห้ามปิดกล่องล็อกอิน
 }
 
-/** เรียกทุกครั้งที่สถานะล็อกอินเปลี่ยน */
 function refreshAuthState() {
     applyLockState();
     if (authRequired()) openAuth("login");
@@ -203,21 +247,18 @@ function switchTab(name, keepResult = false) {
 
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
 
-    /* --- Prompt: เฉพาะแท็บที่ใช้จริง --- */
     $("promptGroup").hidden = !cfg.usesPrompt;
     if (!cfg.usesPrompt) { $("promptInput").value = ""; $("negativeInput").value = ""; }
 
-    /* --- Uploader --- */
     $("uploaderGroup").hidden = !cfg.needsFile;
     if (!cfg.needsFile) clearFile();
     $("dzHint").textContent = L(cfg.hint);
 
-    // keepResult = true แปลว่าแค่รีเฟรชภาษา → ต้องคงค่าที่ผู้ใช้เลือกไว้
     renderOptions(cfg, keepResult);
     $("submitBtn").textContent = L(cfg.cta);
     showHint(authRequired() ? t("auth.required") : L(cfg.hint), !authRequired());
     if (!keepResult) clearResult();
-    applyLockState();                 // ต้องอยู่หลังสุด เพื่อทับค่า disabled ให้ถูก
+    applyLockState();
     syncURL();
 }
 
@@ -228,7 +269,7 @@ function renderOptions(cfg, preserve = false) {
     optionState = {};
 
     Object.entries(cfg.fields || {}).forEach(([key, f]) => {
-        const start = prev[key] !== undefined ? prev[key] : f.default;   // คงค่าเดิมถ้ามี
+        const start = prev[key] !== undefined ? prev[key] : f.default;
         optionState[key] = start;
         const wrap = document.createElement("div");
         wrap.className = "opt";
@@ -270,15 +311,15 @@ function renderOptions(cfg, preserve = false) {
    3. ไฟล์อัปโหลด
    ============================================================ */
 function setFile(file) {
-    if (guardAuth()) return;          // ชั้นที่ 3: กันการลากไฟล์มาวางตอนยังไม่ล็อกอิน
+    if (guardAuth()) return;
     if (!file) return;
     const cfg = TAB_CONFIG[currentTab];
     if (!cfg.accept?.includes(file.type)) return showHint(t("hint.badType"));
     if (file.size > cfg.maxMB * 1024 * 1024) return showHint(t("hint.tooLarge", { n: cfg.maxMB }));
 
-    clearResult();                                    // ผลลัพธ์เก่าไม่ผูกกับไฟล์ใหม่
+    clearResult();
     currentFile = file;
-    $("thumb").src = Blobs.fromFile("preview", file); // registry ดูแล revoke ให้เอง
+    $("thumb").src = Blobs.fromFile("preview", file);
     $("fileName").textContent = file.name;
     $("fileSize").textContent = (file.size / 1048576).toFixed(2) + " MB";
     $("dropZone").hidden = true;
@@ -290,7 +331,7 @@ function clearFile() {
     currentFile = null;
     $("fileInput").value = "";
     $("thumb").removeAttribute("src");   // ล้าง src ก่อน revoke เสมอ
-    Blobs.clear("preview");              // ถ้า result ยังใช้ URL นี้ → registry จะไม่ revoke
+    Blobs.clear("preview");
     $("dropZone").hidden = false;
     $("filePreview").hidden = true;
 }
@@ -298,24 +339,12 @@ function clearFile() {
 /* ============================================================
    4. ผลลัพธ์ / ดาวน์โหลด / เทียบก่อน-หลัง
    ============================================================ */
-
-/* ---------- ตารางแปลง MIME → นามสกุลไฟล์ ---------- */
 const MIME_EXT = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/webp": "webp",
-    "image/gif": "gif",
-    "image/avif": "avif",
-    "image/svg+xml": "svg",
-    "image/bmp": "bmp",
+    "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+    "image/webp": "webp", "image/gif": "gif", "image/avif": "avif",
+    "image/svg+xml": "svg", "image/bmp": "bmp",
 };
 
-/**
- * แปลง MIME type เป็นนามสกุลไฟล์
- * @param {string} mime  เช่น "image/png" หรือ "image/svg+xml; charset=utf-8"
- * @param {string} fallback  ใช้เมื่อไม่รู้จัก MIME นั้น
- */
 function extFromMime(mime, fallback = "png") {
     const clean = String(mime || "").split(";")[0].trim().toLowerCase();
     return MIME_EXT[clean] || fallback;
@@ -330,7 +359,6 @@ function clearResult() {
     $("resultEmpty").hidden = false;
     $("compareToggleWrap").hidden = true;
     $("btnDownload").disabled = true;
-    $("resultImage").style.filter = $("soloImage").style.filter = "";   // เผื่อไว้ ปัจจุบันไม่ได้ใช้แล้ว
 }
 
 function showResult(url, beforeSrc) {
@@ -362,30 +390,24 @@ $("btnDownload").onclick = async () => {
     const url = resultURL();
     if (!url) return;
 
-    // นามสกุลสำรอง = ตามสัญญาใน config (ใช้เมื่ออ่านของจริงไม่ได้)
     const fallbackExt = extFromMime(TAB_CONFIG[currentTab].returns, "png");
     let href = url, temp = null, ext = fallbackExt;
 
     try {
-        // ดึงเป็น blob เสมอ (ทั้ง blob: และ remote) เพื่ออ่าน MIME ของจริง
+        // ดึงเป็น blob เสมอ เพื่ออ่าน MIME ของจริง ไม่ใช่ของที่คาดหวัง
         const res = await fetch(url, url.startsWith("blob:") ? {} : { mode: "cors" });
         const blob = await res.blob();
-        ext = extFromMime(blob.type, fallbackExt);   // ← ใช้ของจริง ไม่ใช่ของที่คาดหวัง
+        ext = extFromMime(blob.type, fallbackExt);
         href = temp = URL.createObjectURL(blob);
-    } catch {
-        // ดึงไม่ได้ (เช่นโดน CORS) → ใช้ URL เดิม + นามสกุลตามสัญญา
-    }
+    } catch { /* CORS บล็อก → ใช้ URL เดิม + นามสกุลตามสัญญา */ }
 
     const name = `${currentTab}-${Date.now()}.${ext}`;
     try {
         const a = document.createElement("a");
-        a.href = href;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        a.href = href; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
     } catch {
-        window.open(url, "_blank", "noopener");       // fallback สุดท้าย
+        window.open(url, "_blank", "noopener");
     } finally {
         if (temp) setTimeout(() => URL.revokeObjectURL(temp), 4000);
     }
@@ -401,7 +423,7 @@ function showHint(msg, info = false) {
 }
 
 function validate() {
-    if (guardAuth()) return false;    // ชั้นที่ 3: ด่านสุดท้ายก่อนยิงงาน
+    if (guardAuth()) return false;
     const cfg = TAB_CONFIG[currentTab];
     if (cfg.usesPrompt && !$("promptInput").value.trim()) {
         showHint(t("hint.needPrompt")); $("promptInput").focus(); return false;
@@ -413,271 +435,47 @@ function validate() {
 function setBusy(on) {
     $("submitBtn").disabled = on || authRequired();
     $("spinner").hidden = !on;
+    $("btnCancel").hidden = !on;
     if (on) { $("resultEmpty").hidden = true; $("soloImage").hidden = true; $("compareWrap").hidden = true; }
 }
+
+$("btnCancel").onclick = () => inflight?.abort();
 
 $("genForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!validate()) return;
+    if (inflight) return;                       // กันกดซ้ำระหว่างประมวลผล
 
     const cfg = TAB_CONFIG[currentTab];
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    inflight = new AbortController();
 
     clearResult();
-    setBusy(true);                                  // เรียกครั้งเดียว หลัง clearResult
+    setBusy(true);
     try {
-        const url = USE_MOCK ? await mockRequest(cfg) : await realRequest(cfg, controller.signal);
+        const url = await Api.image.process({
+            tab: currentTab,
+            cfg,
+            file: currentFile,
+            prompt: $("promptInput").value.trim(),
+            negative: $("negativeInput").value.trim(),
+            options: optionState,
+            previewUrl: previewURL(),
+            signal: inflight.signal,
+        });
         showResult(url, cfg.needsFile ? previewURL() : null);
-        showHint(USE_MOCK ? t("hint.mock") : "", true);
+        showHint(Api.isMock() ? t("hint.mock") : "", true);
     } catch (err) {
-        showHint(err.name === "AbortError" ? t("hint.abort") : t("hint.error", { msg: err.message }));
+        showHint(err?.name === "AbortError" ? t("hint.abort") : t("hint.error", { msg: errMsg(err) }));
         $("resultEmpty").hidden = false;
     } finally {
-        clearTimeout(timer);
+        inflight = null;
         setBusy(false);
     }
 });
 
 /* ============================================================
-   5.5 API layer — ใส่ token อัตโนมัติ + จัดการ 401
+   6. ล็อกอิน / บัญชี
    ============================================================ */
-const Token = {
-    get: () => localStorage.getItem(STORE + "token"),
-    set: (v) => v
-        ? localStorage.setItem(STORE + "token", v)
-        : localStorage.removeItem(STORE + "token"),
-};
-
-async function apiFetch(path, { auth = true, ...opts } = {}) {
-    const headers = new Headers(opts.headers || {});
-    if (auth && Token.get()) headers.set("Authorization", `Bearer ${Token.get()}`);
-
-    const res = await fetch(API_BASE + path, { ...opts, headers });
-
-    if (res.status === 401) {          // token หมดอายุ → เด้งกลับหน้าล็อกอิน
-        Token.set(null);
-        logout();
-        $("authErr").textContent = t("auth.expired");
-        throw new Error("UNAUTHORIZED");
-    }
-    if (res.status === 403) {          // ล็อกอินแล้วแต่สิทธิ์ไม่พอ
-        throw new Error("FORBIDDEN");
-    }
-    if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try { msg = (await res.json())?.error?.message || msg; } catch { }
-        throw new Error(msg);
-    }
-    return res;
-}
-
-/* ---------- ยิงจริง ---------- */
-async function realRequest(cfg, signal) {
-    let res;
-    if (cfg.type === "text2img") {
-        const [w, h] = (optionState.size || "1024x1024").split("x").map(Number);
-        res = await apiFetch(cfg.endpoint, {
-            method: "POST", signal,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                prompt: $("promptInput").value.trim(),
-                negative_prompt: $("negativeInput").value.trim(),
-                width: w, height: h, steps: optionState.steps,
-            }),
-        });
-    } else {
-        const fd = new FormData();
-        fd.append("image", currentFile);
-        Object.entries(optionState).forEach(([k, v]) => fd.append(k, String(v)));
-        res = await apiFetch(cfg.endpoint, { method: "POST", body: fd, signal });
-    }
-    return URL.createObjectURL(await res.blob());
-}
-
-/* ============================================================
-   5.6 Mock — อบเอฟเฟกต์ลงภาพจริงด้วย canvas
-   ต่างจากเดิมที่ใช้ CSS filter (เห็นบนจอแต่ไฟล์ไม่เปลี่ยน)
-   วิธีนี้ได้ "ไฟล์ใหม่" เหมือนหลังบ้านส่งกลับมาจริง ๆ
-   ============================================================ */
-const MOCK_MAX_SIDE = 1600;   // ย่อภาพก่อนประมวลผล กันภาพใหญ่ทำเบราว์เซอร์ค้าง
-const MOCK_DELAY_MS = 700;    // หน่วงให้เห็นสปินเนอร์ เหมือนรอเซิร์ฟเวอร์จริง
-
-/** โหลด blob URL เข้า <img> เพื่อเอาไปวาดลง canvas */
-function loadImageEl(src) {
-    return new Promise((resolve, reject) => {
-        const im = new Image();
-        im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error(t("hint.decodeFail")));
-        im.src = src;
-    });
-}
-
-/** แปลง canvas เป็น blob URL ตาม MIME ที่ config กำหนดไว้ */
-function canvasToBlobURL(cv, mime) {
-    return new Promise((resolve, reject) => {
-        cv.toBlob(
-            (blob) => (blob ? resolve(URL.createObjectURL(blob)) : reject(new Error(t("hint.exportFail")))),
-            mime || "image/png",
-            0.92
-        );
-    });
-}
-
-/** แท็บ Tone — สร้าง CSS filter string ที่ผันตามสไลเดอร์ความเข้ม */
-function toneFilter() {
-    const s = Math.min(1, Math.max(0, Number(optionState.strength ?? 70) / 100));
-    return {
-        warm: `sepia(${0.55 * s}) saturate(${1 + 0.45 * s})`,
-        cool: `hue-rotate(${200 * s}deg) saturate(${1 + 0.25 * s})`,
-        pastel: `saturate(${1 - 0.45 * s}) brightness(${1 + 0.12 * s})`,
-        mono: `grayscale(${s})`,
-        vivid: `saturate(${1 + 0.9 * s}) contrast(${1 + 0.25 * s})`,
-        cinematic: `contrast(${1 + 0.35 * s}) sepia(${0.35 * s}) saturate(${1 - 0.1 * s})`,
-    }[optionState.tone] || "none";
-}
-
-/** แท็บ Back — จำลองการตัดพื้นหลัง (ของจริงใช้โมเดล segmentation) */
-function drawBackMock(ctx, img, w, h) {
-    const out = optionState.output || "transparent";
-    if (out !== "transparent") {
-        ctx.fillStyle = out === "white" ? "#ffffff" : "#000000";
-        ctx.fillRect(0, 0, w, h);
-    }
-    // ตัดวงรีกลางภาพออกมา สมมติว่าเป็นตัวแบบ
-    ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(w / 2, h * 0.52, w * 0.32, h * 0.44, 0, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(img, 0, 0, w, h);
-    ctx.restore();
-}
-
-/** แท็บ Blur — เบลอ 6 รูปแบบ ผันตามสไลเดอร์ความเบลอ */
-function drawBlurMock(ctx, img, w, h) {
-    const amt = Math.min(100, Math.max(0, Number(optionState.blur_amount ?? 40)));
-    const px = Math.max(1, Math.round((amt / 100) * 26));   // 0–100% → 1–26 px
-    const type = optionState.blur_type || "gaussian";
-    const over = px + 2;   // วาดล้นขอบ กันขอบภาพจางจากการเบลอ
-
-    /* --- โมเสก: ย่อจิ๋วแล้วขยายกลับโดยปิดการไล่สี --- */
-    if (type === "pixelate") {
-        const factor = Math.max(2, Math.round(amt / 2) + 2);
-        const tw = Math.max(1, Math.round(w / factor));
-        const th = Math.max(1, Math.round(h / factor));
-        const tmp = document.createElement("canvas");
-        tmp.width = tw; tmp.height = th;
-        tmp.getContext("2d").drawImage(img, 0, 0, tw, th);
-        ctx.imageSmoothingEnabled = false;      // ← หัวใจของโมเสก
-        ctx.drawImage(tmp, 0, 0, w, h);
-        ctx.imageSmoothingEnabled = true;
-        return;
-    }
-
-    /* --- เคลื่อนไหว: ซ้อนภาพเลื่อนทีละนิดแบบโปร่งแสง --- */
-    if (type === "motion") {
-        const steps = 14;
-        const span = px * 2;
-        ctx.globalAlpha = 1 / steps;
-        for (let i = 0; i < steps; i++) {
-            const dx = (i / (steps - 1) - 0.5) * span;
-            ctx.drawImage(img, dx, 0, w, h);
-        }
-        ctx.globalAlpha = 1;
-        return;
-    }
-
-    /* --- ใบหน้า: ภาพคมทั้งใบ แล้วเบลอเฉพาะวงรีตำแหน่งใบหน้า --- */
-    if (type === "face") {
-        ctx.drawImage(img, 0, 0, w, h);
-        ctx.save();
-        ctx.beginPath();
-        ctx.ellipse(w / 2, h * 0.30, w * 0.17, h * 0.22, 0, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.filter = `blur(${Math.max(8, px)}px)`;   // ปิดบังใบหน้าต้องเบลอแรงพอ
-        ctx.drawImage(img, -over, -over, w + over * 2, h + over * 2);
-        ctx.filter = "none";
-        ctx.restore();
-        return;
-    }
-
-    /* --- ที่เหลือ: เบลอทั้งภาพก่อน --- */
-    ctx.filter = `blur(${px}px)`;
-    ctx.drawImage(img, -over, -over, w + over * 2, h + over * 2);
-    ctx.filter = "none";
-    if (type === "gaussian") return;
-
-    /* --- พื้นหลัง / รัศมี: คืนความคมให้บริเวณตรงกลาง --- */
-    ctx.save();
-    ctx.beginPath();
-    if (type === "background") ctx.ellipse(w / 2, h * 0.52, w * 0.30, h * 0.42, 0, 0, Math.PI * 2);
-    else ctx.arc(w / 2, h / 2, Math.min(w, h) * 0.34, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(img, 0, 0, w, h);
-    ctx.restore();
-}
-
-async function mockRequest(cfg) {
-    await new Promise((r) => setTimeout(r, MOCK_DELAY_MS));
-
-    /* GenImage ยังไม่มีรูปต้นทาง → ใช้ภาพตัวอย่างจากอินเทอร์เน็ต
-       ".png" สำคัญมาก ถ้าไม่ใส่ placehold.co จะส่ง SVG มาให้ */
-    if (cfg.type === "text2img") {
-        const [w, h] = (optionState.size || "1024x1024").split("x");
-        return `https://placehold.co/${w}x${h}/1f2937/94a3b8.png?text=MOCK+GenImage`;
-    }
-
-    const img = await loadImageEl(previewURL());
-    const long = Math.max(img.naturalWidth, img.naturalHeight) || 1;
-    const scale = Math.min(1, MOCK_MAX_SIDE / long);
-    const w = Math.max(1, Math.round(img.naturalWidth * scale));
-    const h = Math.max(1, Math.round(img.naturalHeight * scale));
-
-    const cv = document.createElement("canvas");
-    cv.width = w;
-    cv.height = h;
-    const ctx = cv.getContext("2d");
-
-    if (currentTab === "blur") drawBlurMock(ctx, img, w, h);
-    else if (currentTab === "back") drawBackMock(ctx, img, w, h);
-    else {
-        // icon = ลบนอยส์แล้วภาพเนียนขึ้นเล็กน้อย · tone = ตามชิป + สไลเดอร์
-        ctx.filter = currentTab === "tone" ? toneFilter() : "saturate(1.06) contrast(1.04) blur(0.4px)";
-        ctx.drawImage(img, 0, 0, w, h);
-        ctx.filter = "none";
-    }
-
-    return canvasToBlobURL(cv, cfg.returns);
-}
-
-/* ============================================================
-   6. ล็อกอิน / บัญชี  (mock — เก็บใน localStorage)
-   ============================================================ */
-const users = () => JSON.parse(localStorage.getItem(STORE + "users") || "[]");
-const saveUsers = (u) => localStorage.setItem(STORE + "users", JSON.stringify(u));
-
-/* ⚠️ djb2 ไม่ใช่ cryptographic hash — ใช้ได้เฉพาะโหมด mock เท่านั้น
-   ระบบจริงต้องแฮชที่ "หลังบ้าน" ด้วย argon2id หรือ bcrypt (cost >= 12)
-   การแฮชฝั่ง client ไม่ช่วยเรื่องความปลอดภัยเลย เพราะโค้ดเปิดให้อ่านได้ทุกคน */
-const hash = (s) => { let h = 5381; for (const c of s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return h.toString(16); };
-
-/** สร้างบัญชีเจ้าหน้าที่ตั้งต้น เมื่อระบบยังไม่มี staff เลยแม้แต่คนเดียว
-    ⚠️ mock เท่านั้น — ระบบจริงต้อง seed จากฝั่งเซิร์ฟเวอร์ */
-function ensureSeedStaff() {
-    if (!USE_MOCK) return;
-    const list = users();
-    if (list.some((u) => u.role === "staff")) return;
-    list.push({
-        name: SEED_STAFF.name,
-        email: SEED_STAFF.email,
-        pw: hash(SEED_STAFF.password),
-        role: "staff",
-        created_at: new Date().toISOString(),
-        seeded: true,
-    });
-    saveUsers(list);
-}
-
 function openAuth(mode = "login") {
     authMode = mode;
     $("authTitle").textContent = t(mode === "login" ? "auth.title" : "auth.titleReg");
@@ -686,7 +484,7 @@ function openAuth(mode = "login") {
     $("nameField").hidden = mode === "login";
     $("authPass").autocomplete = mode === "login" ? "current-password" : "new-password";
     $("seedNote").textContent = t("auth.seedNote", { email: SEED_STAFF.email, pass: SEED_STAFF.password });
-    $("seedNote").hidden = !USE_MOCK || mode !== "login";
+    $("seedNote").hidden = !Api.isMock() || mode !== "login";
     $("authErr").textContent = "";
     $("authModal").hidden = false;
     $("authClose").hidden = authRequired();
@@ -695,7 +493,14 @@ function openAuth(mode = "login") {
 
 $("authSwitch").onclick = () => openAuth(authMode === "login" ? "register" : "login");
 
-$("authForm").addEventListener("submit", (e) => {
+function setAuthBusy(on) {
+    $("authSubmit").disabled = on;
+    $("authSubmit").textContent = on
+        ? t("auth.working")
+        : t(authMode === "login" ? "auth.login" : "auth.register");
+}
+
+$("authForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("authName").value.trim();
     const email = $("authEmail").value.trim().toLowerCase();
@@ -705,92 +510,95 @@ $("authForm").addEventListener("submit", (e) => {
     if (!email || !pass || (authMode === "register" && !name)) return err("auth.errFields");
     if (!/^\S+@\S+\.\S+$/.test(email)) return err("auth.errEmail");
 
-    // ตรวจความแข็งแรงของรหัสผ่าน "เฉพาะตอนสมัคร"
-    // ตอนล็อกอินไม่ตรวจ เพราะบัญชีเก่าอาจตั้งไว้ก่อนกฎใหม่ (ระบบจริงก็ทำแบบนี้)
+    // ตรวจความแข็งแรงเฉพาะตอนสมัคร — บัญชีเก่าอาจตั้งไว้ก่อนกฎใหม่
     if (authMode === "register") {
         if (pass.length < 8) return err("auth.errShort");
         if (!/[A-Za-z]/.test(pass) || !/\d/.test(pass)) return err("auth.errWeak");
     }
 
-    const list = users();
-    const found = list.find((u) => u.email === email);
-
-    if (authMode === "register") {
-        if (found) return err("auth.errExists");
-        // สมัครเองได้เฉพาะ role "user" เท่านั้น — staff ต้องถูกเลื่อนขั้นจากหน้าเจ้าหน้าที่
-        list.push({ name, email, pw: hash(pass), role: "user", created_at: new Date().toISOString() });
-        saveUsers(list);
-        login({ name, email, role: "user" });
-    } else {
-        // ข้อความ error ต้องคลุมเครือเหมือนกันทั้ง 2 กรณี
-        // ไม่งั้นคนร้ายจะเดาได้ว่าอีเมลไหนมีอยู่ในระบบ (user enumeration)
-        if (!found) return err("auth.errNoUser");
-        if (found.pw !== hash(pass)) return err("auth.errPass");
-        login({ name: found.name, email: found.email, role: found.role || "user" });
+    $("authErr").textContent = "";
+    setAuthBusy(true);
+    try {
+        const res = authMode === "register"
+            ? await Api.auth.register({ name, email, password: pass })
+            : await Api.auth.login({ email, password: pass });
+        await applyLogin(res.user, res.access_token);
+    } catch (e2) {
+        $("authErr").textContent = errMsg(e2);
+    } finally {
+        setAuthBusy(false);
     }
 });
 
-function login(u, token = null) {
-    const exp = Date.now() + SESSION_TTL_HOURS * 3600 * 1000;
-    user = { ...u, exp };
-    sessionExpired = false;
-    localStorage.setItem(STORE + "session", JSON.stringify(user));
-    if (token) Token.set(token);          // โหมดจริง: เก็บ access_token จากหลังบ้าน
+async function applyLogin(u, token) {
+    user = Api.Session.save(u, token);
     $("authForm").reset();
     clearFile();                          // ไม่ให้ไฟล์ของคนก่อนหน้าค้างข้ามบัญชี
     clearResult();
     loadTabPrefs();
-    loadNotes();
     applyI18n();
-    refreshAuthState();                   // ปลดล็อกหน้าจอ + ปิดกล่องล็อกอิน
+    refreshAuthState();
     if (!visibleTabs().includes(currentTab)) switchTab(visibleTabs()[0]);
     showHint(t("auth.welcome", { name: u.name }), true);
+    loadNotes();
+    pullPrefs();
 }
 
-function logout() {
+async function doLogout() {
+    try { await Api.auth.logout(); } catch { }
     user = null;
-    localStorage.removeItem(STORE + "session");
-    Token.set(null);
+    inflight?.abort();
     clearFile();
     clearResult();
-    loadTabPrefs();                       // กลับไปใช้ค่าของ guest
-    loadNotes();
+    loadTabPrefs();
     applyI18n();
-    refreshAuthState();                   // ล็อกหน้าจอ + เปิดกล่องล็อกอินค้างไว้
+    refreshAuthState();
+    loadNotes();
 }
 
 /* ============================================================
    7. ตั้งค่า — ภาษา + โน้ต
    ============================================================ */
 let noteTimer;
-function loadNotes() { $("notesInput").value = localStorage.getItem(uKey("notes")) || ""; }
+
+async function loadNotes() {
+    try { $("notesInput").value = await Api.user.getNotes(); }
+    catch { $("notesInput").value = ""; }
+}
 
 $("notesInput").addEventListener("input", () => {
     if (authRequired()) return;
     clearTimeout(noteTimer);
-    noteTimer = setTimeout(() => {
-        localStorage.setItem(uKey("notes"), $("notesInput").value);
-        $("notesStatus").textContent = `✓ ${t("settings.saved")} · ${new Date().toLocaleTimeString()}`;
+    noteTimer = setTimeout(async () => {
+        const val = $("notesInput").value;
+        try {
+            await Api.user.saveNotes(val);
+            $("notesStatus").textContent = `✓ ${t("settings.saved")} · ${new Date().toLocaleTimeString()}`;
+        } catch {
+            $("notesStatus").textContent = `⚠ ${t("settings.syncFail")}`;
+        }
     }, 500);
 });
 
 $("langSelect").addEventListener("change", (e) => {
     lang = e.target.value;
-    localStorage.setItem(STORE + "lang", lang);   // ภาษาเก็บแยกจากบัญชี ใช้ร่วมทุกคน
+    localStorage.setItem(STORE + "lang", lang);
+    if (Api.isLive() && user) Api.user.savePreferences({ lang, tabs: tabPrefs }).catch(() => { });
     applyI18n();
 });
 
-$("btnReset").onclick = () => {
-    Object.keys(localStorage).filter((k) => k.startsWith(STORE)).forEach((k) => localStorage.removeItem(k));
+$("btnReset").onclick = async () => {
+    Api.wipeLocal();
     user = null; lang = "th";
     Blobs.clearAll();
     clearFile(); clearResult();
-    ensureSeedStaff();                    // สร้างบัญชีเจ้าหน้าที่ตั้งต้นขึ้นใหม่
-    loadTabPrefs(); loadNotes(); applyI18n();
+    loadTabPrefs();
+    applyI18n();
     $("langSelect").value = lang;
     $("settingsModal").hidden = true;
     $("notesStatus").textContent = t("settings.resetOk");
-    refreshAuthState();                   // ล้างข้อมูล = ออกจากระบบด้วย
+    refreshAuthState();
+    loadNotes();
 };
 
 /* ============================================================
@@ -831,8 +639,8 @@ $("menuPop").querySelectorAll(".pop-item").forEach((btn) => {
     btn.addEventListener("click", () => {
         $("menuPop").hidden = true;
         const act = btn.dataset.act;
-        if (act === "auth") { user ? logout() : openAuth("login"); return; }
-        if (guardAuth()) return;                    // settings / tabs / admin ต้องล็อกอินก่อน
+        if (act === "auth") { user ? doLogout() : openAuth("login"); return; }
+        if (guardAuth()) return;
         if (act === "settings") { $("langSelect").value = lang; loadNotes(); openModal("settingsModal"); }
         if (act === "tabs") { renderTabManager(); openModal("tabsModal"); }
         if (act === "admin") {
@@ -885,7 +693,7 @@ $("clearPrompt").onclick = () => {
 };
 [$("promptInput"), $("negativeInput")].forEach((el) => el.addEventListener("input", syncURL));
 
-/* ---------- กันการลากไฟล์มาวางนอก dropzone (เบราว์เซอร์จะเปิดไฟล์แทนหน้าเว็บ) ---------- */
+/* ---------- กันการลากไฟล์มาวางนอก dropzone ---------- */
 ["dragover", "drop"].forEach((ev) =>
     window.addEventListener(ev, (e) => { if (e.target !== dz && !dz?.contains(e.target)) e.preventDefault(); })
 );
@@ -893,19 +701,30 @@ $("clearPrompt").onclick = () => {
 /* ---------- ซิงก์สถานะข้ามแท็บเบราว์เซอร์ ---------- */
 window.addEventListener("storage", (e) => {
     if (e.key !== STORE + "session" && e.key !== STORE + "users") return;
-    user = loadSession();                 // ออกจากระบบ/ถูกลดสิทธิ์ที่แท็บอื่น → ตามทันที
+    user = Api.Session.load();
     applyI18n();
     refreshAuthState();
 });
 
 /* ============================================================
-   9. Init
+   9. Boot
    ============================================================ */
-(function init() {
-    $("mockBadge").hidden = !USE_MOCK;
-    ensureSeedStaff();                                    // ต้องมาก่อนทุกอย่าง
+(async function boot() {
+    updateConn();
+    await Api.init();                              // ตัดสินใจโหมด mock/live ที่นี่
+    $("mockBadge").hidden = !Api.isMock();
+
+    /* โหมด live: ถ้ามี token ค้างอยู่ ต้องถามเซิร์ฟเวอร์ว่ายังใช้ได้ไหม */
+    if (Api.isLive() && user && Api.Token.get()) {
+        try {
+            const j = await Api.auth.me();
+            if (j?.user) user = Api.Session.save(j.user, null);
+        } catch {
+            user = null;                           // token เสีย → ถือว่ายังไม่ล็อกอิน
+        }
+    }
+
     loadTabPrefs();
-    loadNotes();
 
     const q = new URLSearchParams(location.search);
     const hashTab = location.hash.replace("#", "");
@@ -920,6 +739,12 @@ window.addEventListener("storage", (e) => {
     }
     $("langSelect").value = lang;
 
-    refreshAuthState();                                   // ล็อก/ปลดล็อกตามสถานะจริง
-    if (sessionExpired) $("authErr").textContent = t("auth.expired");
+    refreshAuthState();
+    if (Api.Session.wasExpired()) {
+        $("authErr").textContent = t("auth.expired");
+        Api.Session.ackExpired();
+    }
+
+    loadNotes();
+    pullPrefs();
 })();
