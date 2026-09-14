@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Staff Console — AI Image Studio</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body class="admin-body">
+
+    <div id="mockBadge" class="mock-badge" hidden></div>
+
+    <header class="topbar admin-topbar">
+        <h1 class="admin-brand">🛡️ <span data-i18n="admin.title"></span></h1>
+        <div class="spacer"></div>
+        <button type="button" id="connBadge" class="conn-badge checking">
+            <span class="conn-dot"></span><span id="connText"></span>
+        </button>
+        <select id="langSelect" class="admin-lang">
+            <option value="th">ไทย</option>
+            <option value="en">English</option>
+        </select>
+        <a href="index.html" class="ghost" data-i18n="admin.back"></a>
+        <button id="btnLogout" class="ghost danger" data-i18n="nav.logout"></button>
+    </header>
+
+    <!-- ===== ชั้นที่ 2: ล็อกอินแล้วแต่ไม่ใช่เจ้าหน้าที่ ===== -->
+    <section id="deniedView" class="denied" hidden>
+        <div class="lock-chip">⛔</div>
+        <h2 data-i18n="admin.denied"></h2>
+        <p id="deniedDesc" class="muted"></p>
+        <a href="index.html" class="cta as-link" data-i18n="admin.back"></a>
+    </section>
+
+    <!-- ===== หน้าเจ้าหน้าที่ ===== -->
+    <main id="adminView" class="admin-wrap" hidden>
+
+        <div class="admin-head">
+            <div>
+                <p class="muted admin-sub" data-i18n="admin.subtitle"></p>
+                <p class="muted admin-me">
+                    <span data-i18n="admin.signedAs"></span>
+                    <strong id="whoami"></strong>
+                    <span class="role-tag staff" data-i18n="role.staff"></span>
+                </p>
+            </div>
+        </div>
+
+        <p class="admin-warn" data-i18n="admin.warn"></p>
+
+        <div class="stat-grid">
+            <div class="stat-card"><b id="statTotal">0</b><span data-i18n="admin.statTotal"></span></div>
+            <div class="stat-card"><b id="statStaff">0</b><span data-i18n="admin.statStaff"></span></div>
+            <div class="stat-card"><b id="statUser">0</b><span data-i18n="admin.statUser"></span></div>
+            <div class="stat-card"><b id="statSize">0 KB</b><span data-i18n="admin.statSize"></span></div>
+        </div>
+
+        <p id="adminMsg" class="admin-msg" hidden></p>
+
+        <section class="panel">
+            <div class="table-head">
+                <input type="text" id="searchInput" data-i18n-ph="admin.search">
+                <button id="btnRefresh" class="ghost">⟳ <span data-i18n="admin.refresh"></span></button>
+                <button id="btnExport" class="ghost">⬇ <span data-i18n="admin.export"></span></button>
+            </div>
+
+            <div class="table-scroll">
+                <table class="user-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="admin.colName"></th>
+                            <th data-i18n="admin.colEmail"></th>
+                            <th data-i18n="admin.colRole"></th>
+                            <th data-i18n="admin.colCreated"></th>
+                            <th data-i18n="admin.colActions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="userRows"></tbody>
+                </table>
+            </div>
+
+            <p id="emptyRow" class="muted center empty-row" hidden data-i18n="admin.empty"></p>
+        </section>
+    </main>
+
+    <script src="js/config.js" defer></script>
+    <script src="js/api.js" defer></script>
+    <script src="js/admin.js" defer></script>
+</body>
+
+</html>
