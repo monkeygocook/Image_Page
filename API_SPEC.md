@@ -312,3 +312,16 @@ Production ต้องเปลี่ยนเป็นโดเมนจริ
 | Version | วันที่ | รายการ |
 |---|---|---|
 | 1.0.0 | 2026-09-05 | ฉบับแรก — auth, notes, preferences, image 4 endpoints |
+
+### 9. POST /api/v1/blur
+Content-Type: multipart/form-data
+
+| image    | type   | required | description                    |
+|----------|--------|----------|--------------------------------|
+| image     | image   | yes      | ไฟล์ภาพต้นทาง                   |
+| strength | int    | no       | ความแรงเบลอ 1–20 (default 5)   |
+
+Response 200:
+{ "job_id": "string", "image_url": "string", "status": "done" }
+
+Error 422: { "error": { "code": "INVALID_STRENGTH", "message": "string" } }

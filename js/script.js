@@ -748,3 +748,14 @@ window.addEventListener("storage", (e) => {
     loadNotes();
     pullPrefs();
 })();
+// ใน genForm submit → ไม่ต้องส่ง options สำหรับ tab generate
+const url = await Api.image.process({
+    tab: currentTab,
+    cfg,
+    file: currentFile,
+    prompt: $("promptInput").value.trim(),
+    negative: $("negativeInput").value.trim(),
+    options: currentTab === "generate" ? {} : optionState,
+    previewUrl: previewURL(),
+    signal: inflight.signal,
+});
