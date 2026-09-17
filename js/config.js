@@ -15,6 +15,8 @@ const API_BASE = "http://10.192.0.112:7860";
 const API_MODE = "auto";
 
 const REQUEST_TIMEOUT = 120000;     // เวลารอสูงสุดต่อ 1 request (2 นาที)
+/* งานประมวลผลภาพใช้เวลานานกว่า request ทั่วไปมาก ต้องแยก timeout */
+const PROCESS_TIMEOUT = 120000;   // 2 นาที
 const HEALTH_TIMEOUT = 4000;        // ตรวจสุขภาพเซิร์ฟเวอร์ ต้องตอบเร็ว
 const HEALTH_INTERVAL = 30000;      // ตรวจซ้ำทุก 30 วินาที (เฉพาะโหมด live)
 const NET_RETRY = 1;                // ลองซ้ำกี่ครั้งเมื่อเน็ตสะดุด (เฉพาะ GET)
@@ -291,18 +293,9 @@ const TAB_CONFIG = {
         cta: { th: "สร้างภาพ", en: "Generate" },
         hint: { th: "อธิบายภาพที่ต้องการให้ละเอียด", en: "Describe your image in detail" },
         returns: "image/png",
-        fields: {
-            size: {
-                kind: "enum", label: { th: "ขนาดภาพ", en: "Size" }, default: "1024x1024",
-                values: [
-                    { v: "1024x1024", th: "จัตุรัส 1:1", en: "Square 1:1" },
-                    { v: "1024x1536", th: "แนวตั้ง 2:3", en: "Portrait 2:3" },
-                    { v: "1536x1024", th: "แนวนอน 3:2", en: "Landscape 3:2" },
-                ],
-            },
-            steps: { kind: "range", label: { th: "จำนวนรอบ", en: "Steps" }, min: 10, max: 50, step: 5, default: 30 },
-        },
+        fields: {},
     },
+
     back: {
         label: "Back", type: "img2img",
         usesPrompt: false, needsFile: true,
@@ -369,7 +362,7 @@ const TAB_CONFIG = {
     blur: {
         label: "Blur", type: "img2img",
         usesPrompt: false, needsFile: true,
-        endpoint: "/api/v1/blur-image", contentType: "multipart/form-data",
+        endpoint: "/api/v1/blur", contentType: "multipart/form-data",
         cta: { th: "เบลอภาพ", en: "Apply Blur" },
         hint: { th: "PNG / JPG / WEBP · ไม่เกิน 20 MB", en: "PNG / JPG / WEBP · max 20 MB" },
         accept: ["image/png", "image/jpeg", "image/webp"], maxMB: 20,

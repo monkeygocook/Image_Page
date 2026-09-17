@@ -193,9 +193,7 @@ Endpoint ทุกตัวใน section 4 → เพิ่ม "ต้องม
 |---|---|---|---|
 | `prompt` | string | — | **required**, 1–2000 ตัว |
 | `negative_prompt` | string | `""` | ≤ 2000 ตัว |
-| `width` | int | 1024 | 512–1536, หารด้วย 64 ลงตัว |
-| `height` | int | 1024 | 512–1536, หารด้วย 64 ลงตัว |
-| `steps` | int | 30 | 10–50 |
+
 | `seed` | int | random | -1 = สุ่ม |
 
 ```bash
@@ -263,7 +261,15 @@ curl -X POST http://127.0.0.1:7860/api/v1/color-grade \
   -F "tone=warm" -F "strength=70" \
   --output graded.jpg
 ```
+### POST /api/v1/blur
+| field       | type   | required | description                                              |
+|-------------|--------|----------|----------------------------------------------------------|
+| image       | file   | yes      | ไฟล์ภาพต้นทาง (png/jpeg/webp, ≤ 20 MB)                    |
+| blur_type   | string | no       | gaussian \| background \| face \| motion \| pixelate \| radial (default gaussian) |
+| blur_amount | int    | no       | 0–100 (default 40)                                       |
 
+Response 200: binary image/png  (header: X-Request-Id)
+Error 422: { "error": { "code": "INVALID_BLUR_TYPE" | "INVALID_BLUR_AMOUNT", "message": "string" } }
 ---
 
 ## 5. Rate Limits
