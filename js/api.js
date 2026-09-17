@@ -505,27 +505,36 @@ const Api = (() => {
          * @returns {Promise<string>} URL ของภาพผลลัพธ์ (blob: หรือ http:)
          */
         async process({ tab, cfg, file, prompt, negative, options = {}, previewUrl, signal }) {
+            // โหมดจำลอง — ใช้เครื่องจำลอง canvas ในส่วนที่ 5
             if (isMock()) return mockProcessImage({ tab, cfg, options, previewUrl, signal });
 
-            let blob;
-            if (cfg.type === "text2img") {
-                const [w, h] = String(options.size || "1024x1024").split("x").map(Number);
-                blob = await request(cfg.endpoint, {
-                    method: "POST", signal, expect: "blob",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        prompt, negative_prompt: negative,
-                        width: w, height: h, steps: options.steps,
-                    }),
-                });
+            let body, headers;
+
+            if (cfg.contentType === "application/json") {
+                const p = (prompt || "").trim();
+                if (cfg.usesPrompt && !p) throw new ApiError("VALIDATION_ERROR", "กรุณากรอกคำอธิบายภาพ");
+                const payload = { prompt: p, ...options };
+                if (negative && negative.trim()) payload.negative_prompt = negative.trim();
+                headers = { "Content-Type": "application/json" };
+                body = JSON.stringify(payload);
             } else {
+                if (!file) throw new ApiError("VALIDATION_ERROR", "กรุณาเลือกไฟล์ภาพก่อน");
                 const fd = new FormData();
                 fd.append("image", file, file.name);
-                // ❗ ห้ามตั้ง Content-Type เอง — เบราว์เซอร์ต้องเติม boundary ให้
-                Object.entries(options).forEach(([k, v]) => fd.append(k, String(v)));
-                blob = await request(cfg.endpoint, {
-                    method: "POST", signal, expect: "blob", body: fd,
-                });
+                for (const [k, v] of Object.entries(options)) fd.append(k, String(v));
+                body = fd;   // ห้ามตั้ง Content-Type เอง — เบราว์เซอร์ต้องเติม boundary
+            }
+
+            const blob = await request(cfg.endpoint, {
+                method: "POST", body, headers, signal,
+                expect: "blob", retry: 0, timeout: PROCESS_TIMEOUT,
+            });
+
+            if (!blob || !blob.type.startsWith("image/")) {
+                throw new ApiError(
+                    "UNPROCESSABLE_IMAGE",
+                    `เซิร์ฟเวอร์ไม่ได้ส่งไฟล์ภาพกลับมา (${blob?.type || "unknown"})`
+                );
             }
             return URL.createObjectURL(blob);
         },
