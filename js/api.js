@@ -505,29 +505,53 @@ const Api = (() => {
          * @returns {Promise<string>} URL ของภาพผลลัพธ์ (blob: หรือ http:)
          */
         async process({ tab, cfg, file, prompt, negative, options = {}, previewUrl, signal }) {
-            if (isMock()) return mockProcessImage({ tab, cfg, options, previewUrl, signal });
+            // --- โหมดจำลอง: ไม่ยิง backend ---
+            if (!isLive()) {
+                await new Promise((r) => setTimeout(r, 900));
+                return previewUrl || PLACEHOLDER_URL;
+            }
 
-            let blob;
-            if (cfg.type === "text2img") {
-                const [w, h] = String(options.size || "1024x1024").split("x").map(Number);
-                blob = await request(cfg.endpoint, {
-                    method: "POST", signal, expect: "blob",
+            const url = `${API_BASE}${cfg.endpoint}`;
+            let res;
+
+            if (cfg.contentType === "application/json") {
+                const body = { prompt: (prompt || "").trim() };
+                if (negative && negative.trim()) body.negative_prompt = negative.trim();
+                Object.assign(body, options);
+
+                res = await fetch(url, {
+                    method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        prompt, negative_prompt: negative,
-                        width: w, height: h, steps: options.steps,
-                    }),
+                    body: JSON.stringify(body),
+                    signal,
                 });
             } else {
+                if (!file) throw new Error("กรุณาเลือกไฟล์ภาพก่อน");
                 const fd = new FormData();
                 fd.append("image", file, file.name);
-                // ❗ ห้ามตั้ง Content-Type เอง — เบราว์เซอร์ต้องเติม boundary ให้
-                Object.entries(options).forEach(([k, v]) => fd.append(k, String(v)));
-                blob = await request(cfg.endpoint, {
-                    method: "POST", signal, expect: "blob", body: fd,
-                });
+                for (const [k, v] of Object.entries(options)) fd.append(k, String(v));
+
+                res = await fetch(url, { method: "POST", body: fd, signal });
             }
-            return URL.createObjectURL(blob);
+
+            if (!res.ok) {
+                let msg = `HTTP ${res.status}`;
+                try {
+                    const j = await res.json();
+                    msg = j?.error?.message || msg;
+                } catch { /* ไม่ใช่ JSON */ }
+                const e = new Error(msg);
+                e.status = res.status;
+                e.requestId = res.headers.get("X-Request-Id");
+                throw e;
+            }
+
+            const ct = res.headers.get("Content-Type") || "";
+            if (!ct.startsWith("image/")) {
+                throw new Error(`เซิร์ฟเวอร์ไม่ได้ส่งไฟล์ภาพกลับมา (${ct || "unknown"})`);
+            }
+
+            return URL.createObjectURL(await res.blob());
         },
     };
 

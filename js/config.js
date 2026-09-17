@@ -291,18 +291,9 @@ const TAB_CONFIG = {
         cta: { th: "สร้างภาพ", en: "Generate" },
         hint: { th: "อธิบายภาพที่ต้องการให้ละเอียด", en: "Describe your image in detail" },
         returns: "image/png",
-        fields: {
-            size: {
-                kind: "enum", label: { th: "ขนาดภาพ", en: "Size" }, default: "1024x1024",
-                values: [
-                    { v: "1024x1024", th: "จัตุรัส 1:1", en: "Square 1:1" },
-                    { v: "1024x1536", th: "แนวตั้ง 2:3", en: "Portrait 2:3" },
-                    { v: "1536x1024", th: "แนวนอน 3:2", en: "Landscape 3:2" },
-                ],
-            },
-            steps: { kind: "range", label: { th: "จำนวนรอบ", en: "Steps" }, min: 10, max: 50, step: 5, default: 30 },
-        },
+        fields: {},
     },
+
     back: {
         label: "Back", type: "img2img",
         usesPrompt: false, needsFile: true,
@@ -369,7 +360,7 @@ const TAB_CONFIG = {
     blur: {
         label: "Blur", type: "img2img",
         usesPrompt: false, needsFile: true,
-        endpoint: "/api/v1/blur-image", contentType: "multipart/form-data",
+        endpoint: "/api/v1/blur", contentType: "multipart/form-data",
         cta: { th: "เบลอภาพ", en: "Apply Blur" },
         hint: { th: "PNG / JPG / WEBP · ไม่เกิน 20 MB", en: "PNG / JPG / WEBP · max 20 MB" },
         accept: ["image/png", "image/jpeg", "image/webp"], maxMB: 20,
