@@ -15,6 +15,8 @@ const API_BASE = "http://10.192.0.112:7860";
 const API_MODE = "auto";
 
 const REQUEST_TIMEOUT = 120000;     // เวลารอสูงสุดต่อ 1 request (2 นาที)
+/* งานประมวลผลภาพใช้เวลานานกว่า request ทั่วไปมาก ต้องแยก timeout */
+const PROCESS_TIMEOUT = 120000;   // 2 นาที
 const HEALTH_TIMEOUT = 4000;        // ตรวจสุขภาพเซิร์ฟเวอร์ ต้องตอบเร็ว
 const HEALTH_INTERVAL = 30000;      // ตรวจซ้ำทุก 30 วินาที (เฉพาะโหมด live)
 const NET_RETRY = 1;                // ลองซ้ำกี่ครั้งเมื่อเน็ตสะดุด (เฉพาะ GET)

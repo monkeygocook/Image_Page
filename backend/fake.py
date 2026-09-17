@@ -6,7 +6,9 @@ from pydantic import BaseModel
 from PIL import Image, ImageDraw
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from contextvars import ContextVar
 
+_request_id: ContextVar[str] = ContextVar("request_id", default="")
 app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")
 
 app.add_middleware(
@@ -18,7 +20,11 @@ app.add_middleware(
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     rid = request.headers.get("X-Request-Id") or str(uuid.uuid4())
-    resp = await call_next(request)
+    token = _request_id.set(rid)
+    try:
+        resp = await call_next(request)
+    finally:
+        _request_id.reset(token)
     resp.headers["X-Request-Id"] = rid
     return resp
 
@@ -41,8 +47,7 @@ PLACEHOLDER = "https://placehold.co/768x768/png?text=Fake+Result"
 def job(status: str = "succeeded"):
     return {"job_id": str(uuid.uuid4()), "image_url": PLACEHOLDER, "status": status}
 
-def err(code: str, message: str, http: int = 400):
-    return JSONResponse({"error": {"code": code, "message": message}}, status_code=http)
+
 
 def render(text: str, media: str = "image/png", size=(1024, 1024), bg=(28, 30, 38)):
     img = Image.new("RGB", size, bg)

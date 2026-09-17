@@ -505,53 +505,38 @@ const Api = (() => {
          * @returns {Promise<string>} URL ของภาพผลลัพธ์ (blob: หรือ http:)
          */
         async process({ tab, cfg, file, prompt, negative, options = {}, previewUrl, signal }) {
-            // --- โหมดจำลอง: ไม่ยิง backend ---
-            if (!isLive()) {
-                await new Promise((r) => setTimeout(r, 900));
-                return previewUrl || PLACEHOLDER_URL;
-            }
+            // โหมดจำลอง — ใช้เครื่องจำลอง canvas ในส่วนที่ 5
+            if (isMock()) return mockProcessImage({ tab, cfg, options, previewUrl, signal });
 
-            const url = `${API_BASE}${cfg.endpoint}`;
-            let res;
+            let body, headers;
 
             if (cfg.contentType === "application/json") {
-                const body = { prompt: (prompt || "").trim() };
-                if (negative && negative.trim()) body.negative_prompt = negative.trim();
-                Object.assign(body, options);
-
-                res = await fetch(url, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
-                    signal,
-                });
+                const p = (prompt || "").trim();
+                if (cfg.usesPrompt && !p) throw new ApiError("VALIDATION_ERROR", "กรุณากรอกคำอธิบายภาพ");
+                const payload = { prompt: p, ...options };
+                if (negative && negative.trim()) payload.negative_prompt = negative.trim();
+                headers = { "Content-Type": "application/json" };
+                body = JSON.stringify(payload);
             } else {
-                if (!file) throw new Error("กรุณาเลือกไฟล์ภาพก่อน");
+                if (!file) throw new ApiError("VALIDATION_ERROR", "กรุณาเลือกไฟล์ภาพก่อน");
                 const fd = new FormData();
                 fd.append("image", file, file.name);
                 for (const [k, v] of Object.entries(options)) fd.append(k, String(v));
-
-                res = await fetch(url, { method: "POST", body: fd, signal });
+                body = fd;   // ห้ามตั้ง Content-Type เอง — เบราว์เซอร์ต้องเติม boundary
             }
 
-            if (!res.ok) {
-                let msg = `HTTP ${res.status}`;
-                try {
-                    const j = await res.json();
-                    msg = j?.error?.message || msg;
-                } catch { /* ไม่ใช่ JSON */ }
-                const e = new Error(msg);
-                e.status = res.status;
-                e.requestId = res.headers.get("X-Request-Id");
-                throw e;
-            }
+            const blob = await request(cfg.endpoint, {
+                method: "POST", body, headers, signal,
+                expect: "blob", retry: 0, timeout: PROCESS_TIMEOUT,
+            });
 
-            const ct = res.headers.get("Content-Type") || "";
-            if (!ct.startsWith("image/")) {
-                throw new Error(`เซิร์ฟเวอร์ไม่ได้ส่งไฟล์ภาพกลับมา (${ct || "unknown"})`);
+            if (!blob || !blob.type.startsWith("image/")) {
+                throw new ApiError(
+                    "UNPROCESSABLE_IMAGE",
+                    `เซิร์ฟเวอร์ไม่ได้ส่งไฟล์ภาพกลับมา (${blob?.type || "unknown"})`
+                );
             }
-
-            return URL.createObjectURL(await res.blob());
+            return URL.createObjectURL(blob);
         },
     };
 
