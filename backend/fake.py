@@ -11,9 +11,16 @@ from contextvars import ContextVar
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")
 
+ALLOWED_ORIGINS = [
+    "http://127.0.0.1:8000", "http://localhost:8000",
+    "http://127.0.0.1:8080", "http://localhost:8080",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,   # ไม่ใช้ "*" แล้ว — ล็อกเฉพาะพอร์ต 80xx
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
     expose_headers=["X-Request-Id"],
 )
 

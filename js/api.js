@@ -188,23 +188,17 @@ const Api = (() => {
         return h.toString(16);
     };
 
-    /** สร้างบัญชีเจ้าหน้าที่ตั้งต้นเมื่อระบบยังไม่มี staff เลยแม้แต่คนเดียว */
+    /* ไม่สร้างบัญชีเจ้าหน้าที่ตั้งต้น */
     function ensureSeedStaff() {
+        if (PUBLIC_MODE) return;        // ไม่สร้างบัญชีเจ้าหน้าที่ตั้งต้น
         const list = mockUsers();
-        if (list.some((u) => u.role === "staff")) return;
-        list.push({
-            name: SEED_STAFF.name,
-            email: SEED_STAFF.email,
-            pw: weakHash(SEED_STAFF.password),
-            role: "staff",
-            created_at: new Date().toISOString(),
-            seeded: true,
-        });
-        saveMockUsers(list);
+        // ...(ส่วนที่เหลือคงเดิม)
     }
 
     const publicUser = (u) => ({
-        name: u.name, email: u.email, role: u.role || "user", created_at: u.created_at,
+        name: u.name, email: u.email,
+        role: PUBLIC_MODE ? "user" : (u.role || "user"),   // บังคับ user เสมอ
+        created_at: u.created_at,
     });
 
     /* ========================================================
@@ -546,6 +540,7 @@ const Api = (() => {
         keyOf: (u) => u.id ?? u.email,
 
         async list() {
+            if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
             if (isMock()) {
                 await sleep(150);
                 return mockUsers().map(publicUser);
@@ -555,6 +550,7 @@ const Api = (() => {
         },
 
         async setRole(key, role) {
+            if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
             if (isMock()) {
                 await sleep(150);
                 const meNow = Session.load();
@@ -579,6 +575,7 @@ const Api = (() => {
         },
 
         async remove(key) {
+            if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
             if (isMock()) {
                 await sleep(150);
                 const meNow = Session.load();

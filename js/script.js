@@ -102,7 +102,7 @@ function applyI18n() {
     $("popRole").textContent = user ? t("role." + (user.role || "user")) : "";
     $("popRole").hidden = !user;
     $("popRole").classList.toggle("staff", isStaff());
-    $("popAdmin").hidden = !isStaff();
+    $("popAdmin").hidden = PUBLIC_MODE || user?.role !== "staff";
     $("avatarText").textContent = user ? user.name.slice(0, 1).toUpperCase() : "?";
     if (!$("authModal").hidden) openAuth(authMode);
     applyMockUI();

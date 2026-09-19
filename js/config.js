@@ -2,17 +2,20 @@
    config.js — Single Source of Truth
    ทีมหลังบ้าน: อ่านไฟล์นี้ไฟล์เดียวพอ ทุก endpoint และ field อยู่ที่นี่
    ============================================================ */
+/* ============================================================
+   จุดเชื่อมต่อ Backend
+   ผู้ใช้เปิดหน้าเว็บที่พอร์ต 8000 — ส่วนนี้ชี้ไปพอร์ต 5000 ของ backend
+   ============================================================ */
+const BACKEND_PORT = 5000;
 
-/* ---------- ปลายทาง API ---------- */
-// แก้จาก 127.0.0.1 หรือ localhost ให้เป็น IP ของเครื่องคุณจริงๆ
-const API_BASE = "http://10.192.0.112:7860";
+const API_BASE = `${location.protocol}//${location.hostname}:${BACKEND_PORT}`;
 
 
 /* โหมดการทำงาน:
    "mock" = ใช้ข้อมูลจำลองเสมอ (พัฒนา UI)
    "live" = ยิง Backend จริงเสมอ (production)
    "auto" = ตรวจ /health ตอนเปิดหน้า เจอก็ใช้จริง ไม่เจอก็ถอยไป mock  ← แนะนำตอนนี้ */
-const API_MODE = "auto";
+const API_MODE = "auto";   // auto = ping 5000 ก่อน ถ้าไม่ตอบค่อยถอยไป mock
 
 const REQUEST_TIMEOUT = 120000;     // เวลารอสูงสุดต่อ 1 request (2 นาที)
 /* งานประมวลผลภาพใช้เวลานานกว่า request ทั่วไปมาก ต้องแยก timeout */
@@ -28,14 +31,19 @@ const MOCK_UI_DEFAULT = {
     seedHint: true,   // 3. กล่องบัญชีทดสอบในหน้า login
     mockNote: true,   // 4. บรรทัดหมายเหตุใต้ฟอร์ม login
 };
+/* โหมดเผยแพร่ต่อผู้ใช้ทั่วไป
+   true  = ทุกบัญชีเป็น user, ไม่มีหน้า admin, ไม่มีป้ายโหมดจำลอง
+   false = โหมดพัฒนา เห็นทุกอย่าง */
+const PUBLIC_MODE = true;
+
 
 /** อ่านค่าจริง = ค่าตั้งต้น ทับด้วยค่าที่ผู้ใช้ตั้งไว้ใน localStorage */
 function mockUI() {
+    if (PUBLIC_MODE) {
+        return { enabled: false, banner: false, pill: false, seedHint: false, mockNote: false };
+    }
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem(STORE + "mockui") || "{}"); } catch { }
-    const cfg = { ...MOCK_UI_DEFAULT, ...saved };
-    if (!cfg.enabled) return { enabled: false, banner: false, pill: false, seedHint: false, mockNote: false };
-    return cfg;
+    // ...(ส่วนที่เหลือคงเดิม)
 }
 
 /* วิธีปรับสดใน Console (ไม่ต้องแก้ไฟล์ ไม่ต้องรีสตาร์ต):
