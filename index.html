@@ -10,13 +10,13 @@
 
 <body>
 
-    <div id="mockBadge" class="mock-badge" hidden></div>
+    <div id="mockBadge" class="mock-badge" data-mockui="banner" hidden></div>
 
     <header class="topbar">
         <nav class="tabbar" id="tabBar"></nav>
         <button id="btnTabs" class="icon-btn" title="จัดการแท็บ">✏️</button>
         <div class="spacer"></div>
-        <button type="button" id="connBadge" class="conn-badge checking">
+        <button type="button" id="connBadge" class="conn-badge checking" data-mockui="pill">
             <span class="conn-dot"></span><span id="connText"></span>
         </button>
         <button id="btnAccount" class="avatar-btn" title="บัญชี"><span id="avatarText">?</span></button>
@@ -153,15 +153,16 @@
                 <button type="submit" class="cta" id="authSubmit"></button>
             </form>
             <button id="authSwitch" class="link-btn center"></button>
-            <small id="seedNote" class="seed-note"></small>
-            <small class="muted center" data-i18n="auth.mockNote"></small>
+            <small id="seedNote" class="seed-note" data-mockui="seedHint"></small>
+            <small class="muted center" data-mockui="mockNote" data-i18n="auth.mockNote"></small>
             <button id="authClose" class="modal-x" data-close>✕</button>
         </div>
     </div>
 
     <script src="js/config.js" defer></script>
-    <script src="/js/api.js" defer></script>
+    <script src="js/api.js" defer></script>
     <script src="js/script.js" defer></script>
+
 </body>
 
 </html>

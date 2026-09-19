@@ -1019,3 +1019,8 @@ select:focus {
     font-size: 14px;
     margin: 0
 }
+
+/* ปิดป้ายแจ้งเตือนโหมดจำลอง — ทับทุกกฎ รวมถึงการ toggle .hidden จาก JS */
+[data-mockui].mockui-off {
+    display: none !important;
+}

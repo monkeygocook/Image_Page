@@ -5,7 +5,19 @@
    ⚠️ ไฟล์นี้ห้ามเรียก fetch() หรือแตะ localStorage ของข้อมูลธุรกิจโดยตรง
       ทุกอย่างต้องผ่าน Api.*
    ============================================================ */
+
+/** ซ่อน/แสดงป้ายแจ้งเตือนโหมดจำลองตามค่าใน config */
+/** ซ่อน/แสดงป้ายแจ้งเตือนโหมดจำลองตามค่าใน config */
+function applyMockUI() {
+    const c = mockUI();
+    for (const key of ["banner", "pill", "seedHint", "mockNote"]) {
+        document.querySelectorAll(`[data-mockui="${key}"]`)
+            .forEach((el) => el.classList.toggle("mockui-off", !c[key]));
+    }
+}
+
 const $ = (id) => document.getElementById(id);
+Api
 
 /* ============================================================
    0. Blob Registry — 1 URL มีเจ้าของเดียว กัน leak + กัน double-revoke
@@ -93,6 +105,7 @@ function applyI18n() {
     $("popAdmin").hidden = !isStaff();
     $("avatarText").textContent = user ? user.name.slice(0, 1).toUpperCase() : "?";
     if (!$("authModal").hidden) openAuth(authMode);
+    applyMockUI();
     updateConn();
     renderTabBar();
     if (currentTab) switchTab(currentTab, true);
@@ -122,6 +135,7 @@ Api.onUnauthorized(() => {                 // token หมดอายุระ�
     applyI18n();
     refreshAuthState();
     $("authErr").textContent = t("auth.expired");
+    applyMockUI();
 });
 
 $("connBadge").onclick = async () => {
@@ -238,7 +252,8 @@ function applyLockState() {
 function refreshAuthState() {
     applyLockState();
     if (authRequired()) openAuth("login");
-    else $("authModal").hidden = true;
+    else $("authModal").hidden = true; // ปิดกล่องล็อกอินอัตโนมัติถ้าไม่ล็อกอยู่
+    applyMockUI();
 }
 
 function switchTab(name, keepResult = false) {
@@ -487,6 +502,7 @@ function openAuth(mode = "login") {
     $("seedNote").hidden = !Api.isMock() || mode !== "login";
     $("authErr").textContent = "";
     $("authModal").hidden = false;
+    applyMockUI();
     $("authClose").hidden = authRequired();
     setTimeout(() => $(mode === "login" ? "authEmail" : "authName").focus(), 50);
 }
@@ -608,7 +624,7 @@ const openModal = (id) => ($(id).hidden = false);
 
 /** กล่องล็อกอินต้องปิดไม่ได้ ถ้ายังไม่ผ่านการยืนยันตัวตน */
 const canClose = (m) => !(m.id === "authModal" && authRequired());
-
+applyMockUI();
 document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => {
     const m = b.closest(".modal");
     if (canClose(m)) m.hidden = true;
@@ -711,6 +727,7 @@ window.addEventListener("storage", (e) => {
    ============================================================ */
 (async function boot() {
     updateConn();
+    applyMockUI();
     await Api.init();                              // ตัดสินใจโหมด mock/live ที่นี่
     $("mockBadge").hidden = !Api.isMock();
 

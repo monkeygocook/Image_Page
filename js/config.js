@@ -17,6 +17,42 @@ const API_MODE = "auto";
 const REQUEST_TIMEOUT = 120000;     // เวลารอสูงสุดต่อ 1 request (2 นาที)
 /* งานประมวลผลภาพใช้เวลานานกว่า request ทั่วไปมาก ต้องแยก timeout */
 const PROCESS_TIMEOUT = 120000;   // 2 นาที
+/* ============================================================
+   การแสดงผลป้ายแจ้งเตือนโหมดจำลอง
+   แก้ที่นี่ = ค่าตั้งต้น · แก้สดตอนรัน = ใช้ Console (ดูท้ายบล็อก)
+   ============================================================ */
+const MOCK_UI_DEFAULT = {
+    enabled: true,    // สวิตช์ใหญ่ — false = ปิดทั้ง 4 ตัวทันที
+    banner: true,     // 1. แถบส้มบนสุด
+    pill: true,       // 2. ป้ายสถานะมุมขวาบน
+    seedHint: true,   // 3. กล่องบัญชีทดสอบในหน้า login
+    mockNote: true,   // 4. บรรทัดหมายเหตุใต้ฟอร์ม login
+};
+
+/** อ่านค่าจริง = ค่าตั้งต้น ทับด้วยค่าที่ผู้ใช้ตั้งไว้ใน localStorage */
+function mockUI() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(STORE + "mockui") || "{}"); } catch { }
+    const cfg = { ...MOCK_UI_DEFAULT, ...saved };
+    if (!cfg.enabled) return { enabled: false, banner: false, pill: false, seedHint: false, mockNote: false };
+    return cfg;
+}
+
+/* วิธีปรับสดใน Console (ไม่ต้องแก้ไฟล์ ไม่ต้องรีสตาร์ต):
+   setMockUI({ banner: false })        ปิดเฉพาะแถบส้ม
+   setMockUI({ enabled: false })       ปิดทั้งหมด
+   setMockUI(null)                     คืนค่าตั้งต้น
+*/
+function setMockUI(patch) {
+    if (patch === null) localStorage.removeItem(STORE + "mockui");
+    else {
+        let cur = {};
+        try { cur = JSON.parse(localStorage.getItem(STORE + "mockui") || "{}"); } catch { }
+        localStorage.setItem(STORE + "mockui", JSON.stringify({ ...cur, ...patch }));
+    }
+    if (typeof applyMockUI === "function") applyMockUI();
+    return mockUI();
+}
 const HEALTH_TIMEOUT = 4000;        // ตรวจสุขภาพเซิร์ฟเวอร์ ต้องตอบเร็ว
 const HEALTH_INTERVAL = 30000;      // ตรวจซ้ำทุก 30 วินาที (เฉพาะโหมด live)
 const NET_RETRY = 1;                // ลองซ้ำกี่ครั้งเมื่อเน็ตสะดุด (เฉพาะ GET)
@@ -386,4 +422,4 @@ const TAB_CONFIG = {
             },
         },
     },
-};
+}; 
