@@ -74,6 +74,7 @@ Image_Page/                    ← Git Repository
 
 [คู้มือการทดสอบ]:
 :: เตรียมครั้งเดียว
+Terminal/tab control
 conda activate <env>
 pip install httpx uvicorn starlette fastapi pillow python-multipart
 
