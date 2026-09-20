@@ -162,8 +162,6 @@ async def put_prefs(body: dict, u: dict = Depends(me_user)):
 async def health():
     return {"status": "ok", "version": "1.0.0"}
 
-
-
 @app.post("/api/v1/generate")
 async def generate(req: GenerateRequest):
     if not req.prompt.strip():
@@ -216,6 +214,53 @@ async def blur(
     await image.read()
     await asyncio.sleep(0.8)
     return render(f"BLUR\ntype={blur_type} amount={blur_amount}%")
+def staff_only(u: dict = Depends(me_user)) -> dict:
+    if u["role"] != "staff":
+        raise HTTPException(403, "ต้องเป็นเจ้าหน้าที่เท่านั้น")
+    return u
 
+
+@app.get("/api/v1/admin/users")
+async def admin_list(_: dict = Depends(staff_only)):
+    return {"users": [_public(u) for u in USERS.values()]}
+
+
+@app.put("/api/v1/admin/users/{key}/role")
+@app.patch("/api/v1/admin/users/{key}/role")
+async def admin_set_role(key: str, body: dict, me: dict = Depends(staff_only)):
+    u = USERS.get(key)
+    if not u:
+        return err("USER_NOT_FOUND", "ไม่พบผู้ใช้", 404)
+    role = body.get("role")
+    if role not in ("user", "staff"):
+        return err("INVALID_ROLE", "role ต้องเป็น user หรือ staff", 422)
+    if u["email"] == me["email"] and role != "staff":
+        return err("SELF_DEMOTE", "ลดสิทธิ์ตัวเองไม่ได้", 409)
+    u["role"] = role
+    return {"user": _public(u)}
+
+
+@app.delete("/api/v1/admin/users/{key}", status_code=204)
+async def admin_delete(key: str, me: dict = Depends(staff_only)):
+    if key == me["email"]:
+        return err("SELF_DELETE", "ลบบัญชีตัวเองไม่ได้", 409)
+    if key not in USERS:
+        return err("USER_NOT_FOUND", "ไม่พบผู้ใช้", 404)
+    USERS.pop(key)
+    NOTES.pop(key, None)
+    PREFS.pop(key, None)
+    return Response(status_code=204)
+
+# ก่อนส่งงานจริงต้องลบบล็อกนี้ทิ้ง หรือเปลี่ยนรหัสผ่าน — ตอนนี้รหัสอยู่ในโค้ดแบบเปิดเผย และ repo เป็น Public อยู่
+@app.on_event("startup")
+async def seed_staff():
+    email = "staff@example.com"
+    if email not in USERS:
+        USERS[email] = {
+            "name": "เจ้าหน้าที่ระบบ", "email": email,
+            "pw": _hash("Staff1234"), "role": "staff",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        print(f"[seed] staff = {email} / Staff1234")
 
 
