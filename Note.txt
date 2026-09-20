@@ -34,3 +34,56 @@ ctx.clip();                     // 4. ต่อไปนี้วาดได้
 ctx.drawImage(img, ...);        // 5. ทับด้วยภาพคม → กลางชัด ขอบเบลอ
 ctx.restore();                  // 6. คืนสถานะ ยกเลิก clip
 )
+
+New Reengineer Folder
+
+Image_Page/                    ← Git Repository
+│
+├─ .git/
+│
+├─ Image_Page/                 ← User Frontend
+│  ├─ index.html
+│  │
+│  ├─ css/
+│  │  └─ style.css
+│  │
+│  ├─ js/
+│  │  ├─ config.js
+│  │  ├─ api.js
+│  │  └─ script.js
+│  │
+│  └─ image/
+│
+├─ admin_panel/                ← Admin Frontend
+│  ├─ admin.html
+│  │
+│  ├─ css/
+│  │  └─ style.css
+│  │
+│  └─ js/
+│     ├─ config.admin.js
+│     ├─ api.js
+│     └─ admin.js
+│
+├─ backend/                    ← Backend 
+│  ├─ fake.py
+│  └─ API_SPEC.md
+│
+├─ .gitignore
+├─ README.md
+└─ Note.txt
+
+[คู้มือการทดสอบ]:
+:: เตรียมครั้งเดียว
+Terminal/tab control
+conda activate <env>
+pip install httpx uvicorn starlette fastapi pillow python-multipart
+
+:: 1) Backend
+cd C:\Degree\Degree3\310-3311_Image-Processing_69\Project_im\Image_Page\backend
+uvicorn fake:app --host 127.0.0.1 --port 5050 --reload
+
+:: 2) ผู้ใช้ + 3) แอดมิน  (รันจาก repo root)
+cd C:\Degree\Degree3\310-3311_Image-Processing_69\Project_im\Image_Page
+python proxy.py user
+python proxy.py admin

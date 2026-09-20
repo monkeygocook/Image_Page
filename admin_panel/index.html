@@ -2,6 +2,15 @@
 <html lang="th">
 
 <head>
+    <script>
+        /* กันเปิดตรงผ่าน URL — เด้งกลับหน้าหลักก่อนหน้า admin จะ render */
+        document.documentElement.style.visibility = "hidden";
+    </script>
+    <script src="js/config.js"></script>
+    <script>
+        if (typeof PUBLIC_MODE !== "undefined" && PUBLIC_MODE) location.replace("index.html");
+        else document.documentElement.style.visibility = "";
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Staff Console — AI Image Studio</title>
@@ -85,8 +94,9 @@
         </section>
     </main>
 
-    <script src="js/config.js" defer></script>
+    <script src="js/config.admin.js" defer></script>
     <script src="js/api.js" defer></script>
+    <script src="js/script.js" defer></script>
     <script src="js/admin.js" defer></script>
 </body>
 
