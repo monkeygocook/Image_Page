@@ -1,28 +1,20 @@
 import io, uuid, asyncio
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import Response, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image, ImageDraw
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextvars import ContextVar
+import base64, hmac, hashlib, json, time
+from fastapi import Header, HTTPException
+from datetime import datetime, timezone
+from fastapi import Depends
+
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")
 
-ALLOWED_ORIGINS = [
-    "http://127.0.0.1:8000", "http://localhost:8000",
-    "http://127.0.0.1:8080", "http://localhost:8080",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,   # ไม่ใช้ "*" แล้ว — ล็อกเฉพาะพอร์ต 80xx
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
-    expose_headers=["X-Request-Id"],
-)
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
@@ -75,19 +67,102 @@ async def check_image(image: UploadFile, max_mb: int):
         return err("FILE_TOO_LARGE", f"ไฟล์เกิน {max_mb} MB", 413)
     return None
 
-def err(code: str, message: str, http: int = 422, rid: str | None = None):
+def err(code: str, message: str, http: int = 422):
     return JSONResponse(
-        {"error": {"code": code, "message": message, "request_id": rid}},
+        {"error": {"code": code, "message": message, "request_id": _request_id.get()}},
         status_code=http,
     )
 
 class GenerateRequest(BaseModel):
     prompt: str
     negative_prompt: str | None = None
+    
+SECRET = "dev-secret-change-me"
+USERS: dict[str, dict] = {}          # email -> record
+NOTES: dict[str, str] = {}
+PREFS: dict[str, dict] = {}
+
+def _hash(pw: str) -> str:
+    return hashlib.sha256((SECRET + pw).encode()).hexdigest()
+
+def _token(email: str) -> str:
+    raw = json.dumps({"sub": email, "exp": time.time() + 86400})
+    sig = hmac.new(SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()[:16]
+    return base64.urlsafe_b64encode(f"{raw}|{sig}".encode()).decode()
+
+def _public(u: dict) -> dict:
+    return {"name": u["name"], "email": u["email"],
+            "role": u["role"], "created_at": u["created_at"]}
+
+def me_user(authorization: str | None = Header(None)) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "กรุณาเข้าสู่ระบบ")
+    try:
+        raw, sig = base64.urlsafe_b64decode(authorization[7:]).decode().rsplit("|", 1)
+        good = hmac.new(SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()[:16]
+        data = json.loads(raw)
+        assert hmac.compare_digest(sig, good) and data["exp"] > time.time()
+        return USERS[data["sub"]]
+    except Exception:
+        raise HTTPException(401, "เซสชันหมดอายุ")
+
+
+class AuthIn(BaseModel):
+    name: str | None = None
+    email: str
+    password: str
+
+@app.post("/api/v1/auth/register")
+async def register(b: AuthIn):
+    if b.email in USERS:
+        return err("EMAIL_TAKEN", "อีเมลนี้ถูกใช้แล้ว", 409)
+    if len(b.password) < 8:
+        return err("WEAK_PASSWORD", "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร", 422)
+    USERS[b.email] = {
+        "name": b.name or b.email.split("@")[0], "email": b.email,
+        "pw": _hash(b.password), "role": "user",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return {"user": _public(USERS[b.email]), "access_token": _token(b.email)}
+
+@app.post("/api/v1/auth/login")
+async def login(b: AuthIn):
+    u = USERS.get(b.email)
+    if not u or u["pw"] != _hash(b.password):
+        return err("INVALID_CREDENTIALS", "อีเมลหรือรหัสผ่านไม่ถูกต้อง", 401)
+    return {"user": _public(u), "access_token": _token(b.email)}
+
+@app.get("/api/v1/auth/me")
+async def whoami(u: dict = Depends(me_user)):
+    return {"user": _public(u)}
+
+@app.post("/api/v1/auth/logout", status_code=204)
+async def logout(u: dict = Depends(me_user)):
+    return Response(status_code=204)
+
+@app.get("/api/v1/notes")
+async def get_notes(u: dict = Depends(me_user)):
+    return {"content": NOTES.get(u["email"], "")}
+
+@app.put("/api/v1/notes")
+async def put_notes(body: dict, u: dict = Depends(me_user)):
+    NOTES[u["email"]] = body.get("content", "")
+    return {"ok": True}
+
+@app.get("/api/v1/preferences")
+async def get_prefs(u: dict = Depends(me_user)):
+    return PREFS.get(u["email"], {"lang": "th", "tabs": None})
+
+@app.put("/api/v1/preferences")
+async def put_prefs(body: dict, u: dict = Depends(me_user)):
+    PREFS[u["email"]] = body
+    return {"ok": True}
 
 @app.get("/api/v1/health")
 async def health():
     return {"status": "ok", "version": "1.0.0"}
+
+
 
 @app.post("/api/v1/generate")
 async def generate(req: GenerateRequest):
@@ -141,5 +216,6 @@ async def blur(
     await image.read()
     await asyncio.sleep(0.8)
     return render(f"BLUR\ntype={blur_type} amount={blur_amount}%")
+
 
 

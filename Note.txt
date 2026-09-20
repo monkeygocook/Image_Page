@@ -33,3 +33,41 @@ ctx.clip();                     // 4. ต่อไปนี้วาดได้
 ctx.drawImage(img, ...);        // 5. ทับด้วยภาพคม → กลางชัด ขอบเบลอ
 ctx.restore();                  // 6. คืนสถานะ ยกเลิก clip
 )
+
+New Reengineer Folder
+
+Image_Page/                    ← Git Repository
+│
+├─ .git/
+│
+├─ Image_Page/                 ← User Frontend
+│  ├─ index.html
+│  │
+│  ├─ css/
+│  │  └─ style.css
+│  │
+│  ├─ js/
+│  │  ├─ config.js
+│  │  ├─ api.js
+│  │  └─ script.js
+│  │
+│  └─ image/
+│
+├─ admin_panel/                ← Admin Frontend
+│  ├─ admin.html
+│  │
+│  ├─ css/
+│  │  └─ style.css
+│  │
+│  └─ js/
+│     ├─ config.admin.js
+│     ├─ api.js
+│     └─ admin.js
+│
+├─ backend/                    ← Backend 
+│  ├─ fake.py
+│  └─ API_SPEC.md
+│
+├─ .gitignore
+├─ README.md
+└─ Note.txt

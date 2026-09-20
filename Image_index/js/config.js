@@ -6,16 +6,21 @@
    จุดเชื่อมต่อ Backend
    ผู้ใช้เปิดหน้าเว็บที่พอร์ต 8000 — ส่วนนี้ชี้ไปพอร์ต 5000 ของ backend
    ============================================================ */
+/*
+[PORT-CFG-01]
+
 const BACKEND_PORT = 5000;
 
 const API_BASE = `${location.protocol}//${location.hostname}:${BACKEND_PORT}`;
-
-
 /* โหมดการทำงาน:
    "mock" = ใช้ข้อมูลจำลองเสมอ (พัฒนา UI)
    "live" = ยิง Backend จริงเสมอ (production)
-   "auto" = ตรวจ /health ตอนเปิดหน้า เจอก็ใช้จริง ไม่เจอก็ถอยไป mock  ← แนะนำตอนนี้ */
+   "auto" = ตรวจ /health ตอนเปิดหน้า เจอก็ใช้จริง ไม่เจอก็ถอยไป mock  ← แนะนำตอนนี้ 
 const API_MODE = "auto";   // auto = ping 5000 ก่อน ถ้าไม่ตอบค่อยถอยไป mock
+*/
+
+/* ผ่าน reverse proxy แล้ว — เรียกแบบ same-origin ไม่ต้องรู้พอร์ต backend */
+const API_BASE = "";
 
 const REQUEST_TIMEOUT = 120000;     // เวลารอสูงสุดต่อ 1 request (2 นาที)
 /* งานประมวลผลภาพใช้เวลานานกว่า request ทั่วไปมาก ต้องแยก timeout */
@@ -36,7 +41,7 @@ const MOCK_UI_DEFAULT = {
    false = โหมดพัฒนา เห็นทุกอย่าง */
 const PUBLIC_MODE = true;
 
-
+const API_MODE = PUBLIC_MODE ? "live" : "auto";
 /** อ่านค่าจริง = ค่าตั้งต้น ทับด้วยค่าที่ผู้ใช้ตั้งไว้ใน localStorage */
 function mockUI() {
     if (PUBLIC_MODE) {
