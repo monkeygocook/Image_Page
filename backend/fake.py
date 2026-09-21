@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from fastapi import Depends
 
 #uvicorn fake:app --host 172.20.56.154 --port 5050 --reload
+#uvicorn fake:app --host 0.0.0.0 --port 5050 --proxy-headers --forwarded-allow-ips=172.20.56.250
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")

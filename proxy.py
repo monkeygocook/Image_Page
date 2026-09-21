@@ -30,7 +30,10 @@ client = httpx.AsyncClient(base_url=BACKEND, timeout=180.0)
 
 async def api_proxy(request):
     url = httpx.URL(path=request.url.path, query=request.url.query.encode())
-    headers = [(k, v) for k, v in request.headers.raw if k.lower() != b"host"]
+    DROP = {b"host", b"x-forwarded-for", b"x-real-ip", b"x-forwarded-proto"}
+    headers = [(k, v) for k, v in request.headers.raw if k.lower() not in DROP]
+    ip = request.client.host if request.client else "unknown"
+    headers.append((b"x-forwarded-for", ip.encode()))
     req = client.build_request(
         request.method, url, headers=headers, content=await request.body()
     )
