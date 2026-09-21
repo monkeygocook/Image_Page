@@ -10,6 +10,7 @@ import base64, hmac, hashlib, json, time
 from fastapi import Header, HTTPException
 from datetime import datetime, timezone
 from fastapi import Depends
+import sqlite3
 
 #uvicorn fake:app --host 172.20.56.154 --port 5050 --reload
 #uvicorn fake:app --host 0.0.0.0 --port 5050 --proxy-headers --forwarded-allow-ips=172.20.56.250
@@ -18,6 +19,48 @@ from fastapi import Depends
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")
+
+DB = "Userdata.db"
+
+def init_db():
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
+
+    # ตารางผู้ใช้
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            pw TEXT NOT NULL,
+            role TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # ตาราง Notes
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            email TEXT PRIMARY KEY,
+            content TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (email) REFERENCES users(email)
+        )
+    """)
+
+    # ตาราง Preferences
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS preferences (
+            email TEXT PRIMARY KEY,
+            lang TEXT NOT NULL DEFAULT 'th',
+            tabs TEXT,
+            FOREIGN KEY (email) REFERENCES users(email)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_db()
 
 #from guard import install_guard
 #install_guard(app)
@@ -84,9 +127,6 @@ class GenerateRequest(BaseModel):
     negative_prompt: str | None = None
     
 SECRET = "dev-secret-change-me"
-USERS: dict[str, dict] = {}          # email -> record
-NOTES: dict[str, str] = {}
-PREFS: dict[str, dict] = {}
 
 def _hash(pw: str) -> str:
     return hashlib.sha256((SECRET + pw).encode()).hexdigest()
@@ -101,14 +141,46 @@ def _public(u: dict) -> dict:
             "role": u["role"], "created_at": u["created_at"]}
 
 def me_user(authorization: str | None = Header(None)) -> dict:
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "กรุณาเข้าสู่ระบบ")
+
     try:
-        raw, sig = base64.urlsafe_b64decode(authorization[7:]).decode().rsplit("|", 1)
-        good = hmac.new(SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()[:16]
+        raw, sig = base64.urlsafe_b64decode(
+            authorization[7:]
+        ).decode().rsplit("|", 1)
+
+        good = hmac.new(
+            SECRET.encode(),
+            raw.encode(),
+            hashlib.sha256
+        ).hexdigest()[:16]
+
         data = json.loads(raw)
-        assert hmac.compare_digest(sig, good) and data["exp"] > time.time()
-        return USERS[data["sub"]]
+
+        if not hmac.compare_digest(sig, good):
+            raise Exception()
+
+        if data["exp"] <= time.time():
+            raise Exception()
+
+        conn = sqlite3.connect(DB)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (data["sub"],)
+        )
+
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            raise Exception()
+
+        return dict(row)
+
     except Exception:
         raise HTTPException(401, "เซสชันหมดอายุ")
 
@@ -120,23 +192,75 @@ class AuthIn(BaseModel):
 
 @app.post("/api/v1/auth/register")
 async def register(b: AuthIn):
-    if b.email in USERS:
+
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT email FROM users WHERE email = ?",
+        (b.email,)
+    )
+
+    if cur.fetchone():
+        conn.close()
         return err("EMAIL_TAKEN", "อีเมลนี้ถูกใช้แล้ว", 409)
+
     if len(b.password) < 8:
+        conn.close()
         return err("WEAK_PASSWORD", "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร", 422)
-    USERS[b.email] = {
-        "name": b.name or b.email.split("@")[0], "email": b.email,
-        "pw": _hash(b.password), "role": "user",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+
+    name = b.name or b.email.split("@")[0]
+    pw = _hash(b.password)
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    cur.execute("""
+        INSERT INTO users (email, name, pw, role, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (b.email, name, pw, "user", created_at))
+
+    conn.commit()
+    conn.close()
+
+    user = {
+        "name": name,
+        "email": b.email,
+        "role": "user",
+        "created_at": created_at
     }
-    return {"user": _public(USERS[b.email]), "access_token": _token(b.email)}
+
+    return {
+        "user": user,
+        "access_token": _token(b.email)
+    }
 
 @app.post("/api/v1/auth/login")
 async def login(b: AuthIn):
-    u = USERS.get(b.email)
-    if not u or u["pw"] != _hash(b.password):
-        return err("INVALID_CREDENTIALS", "อีเมลหรือรหัสผ่านไม่ถูกต้อง", 401)
-    return {"user": _public(u), "access_token": _token(b.email)}
+
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT * FROM users WHERE email = ?",
+        (b.email,)
+    )
+
+    row = cur.fetchone()
+    conn.close()
+
+    if not row or row["pw"] != _hash(b.password):
+        return err(
+            "INVALID_CREDENTIALS",
+            "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+            401
+        )
+
+    u = dict(row)
+
+    return {
+        "user": _public(u),
+        "access_token": _token(b.email)
+    }
 
 @app.get("/api/v1/auth/me")
 async def whoami(u: dict = Depends(me_user)):
@@ -148,20 +272,102 @@ async def logout(u: dict = Depends(me_user)):
 
 @app.get("/api/v1/notes")
 async def get_notes(u: dict = Depends(me_user)):
-    return {"content": NOTES.get(u["email"], "")}
+
+    conn = sqlite3.connect(DB)
+
+    row = conn.execute(
+        "SELECT content FROM notes WHERE email = ?",
+        (u["email"],)
+    ).fetchone()
+
+    conn.close()
+
+    if row:
+        return {"content": row[0]}
+
+    return {"content": ""}
 
 @app.put("/api/v1/notes")
-async def put_notes(body: dict, u: dict = Depends(me_user)):
-    NOTES[u["email"]] = body.get("content", "")
+async def put_notes(
+    body: dict,
+    u: dict = Depends(me_user)
+):
+
+    content = body.get("content", "")
+
+    conn = sqlite3.connect(DB)
+
+    conn.execute("""
+        INSERT INTO notes (email, content)
+        VALUES (?, ?)
+        ON CONFLICT(email)
+        DO UPDATE SET content = excluded.content
+    """, (
+        u["email"],
+        content
+    ))
+
+    conn.commit()
+    conn.close()
+
     return {"ok": True}
 
 @app.get("/api/v1/preferences")
 async def get_prefs(u: dict = Depends(me_user)):
-    return PREFS.get(u["email"], {"lang": "th", "tabs": None})
+
+    conn = sqlite3.connect(DB)
+
+    row = conn.execute("""
+        SELECT lang, tabs
+        FROM preferences
+        WHERE email = ?
+    """, (
+        u["email"],
+    )).fetchone()
+
+    conn.close()
+
+    if not row:
+        return {
+            "lang": "th",
+            "tabs": None
+        }
+
+    tabs = json.loads(row[1]) if row[1] else None
+
+    return {
+        "lang": row[0],
+        "tabs": tabs
+    }
 
 @app.put("/api/v1/preferences")
-async def put_prefs(body: dict, u: dict = Depends(me_user)):
-    PREFS[u["email"]] = body
+async def put_prefs(
+    body: dict,
+    u: dict = Depends(me_user)
+):
+
+    lang = body.get("lang", "th")
+    tabs = body.get("tabs")
+
+    conn = sqlite3.connect(DB)
+
+    conn.execute("""
+        INSERT INTO preferences
+        (email, lang, tabs)
+        VALUES (?, ?, ?)
+        ON CONFLICT(email)
+        DO UPDATE SET
+            lang = excluded.lang,
+            tabs = excluded.tabs
+    """, (
+        u["email"],
+        lang,
+        json.dumps(tabs)
+    ))
+
+    conn.commit()
+    conn.close()
+
     return {"ok": True}
 
 @app.get("/api/v1/health")
@@ -228,45 +434,166 @@ def staff_only(u: dict = Depends(me_user)) -> dict:
 
 @app.get("/api/v1/admin/users")
 async def admin_list(_: dict = Depends(staff_only)):
-    return {"users": [_public(u) for u in USERS.values()]}
+
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT name, email, role, created_at
+        FROM users
+    """).fetchall()
+
+    conn.close()
+
+    return {
+        "users": [dict(row) for row in rows]
+    }
 
 
 @app.put("/api/v1/admin/users/{key}/role")
 @app.patch("/api/v1/admin/users/{key}/role")
-async def admin_set_role(key: str, body: dict, me: dict = Depends(staff_only)):
-    u = USERS.get(key)
-    if not u:
+async def admin_set_role(
+    key: str,
+    body: dict,
+    me: dict = Depends(staff_only)
+):
+
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+
+    row = conn.execute("""
+        SELECT *
+        FROM users
+        WHERE email = ?
+    """, (key,)).fetchone()
+
+    if not row:
+        conn.close()
         return err("USER_NOT_FOUND", "ไม่พบผู้ใช้", 404)
+
     role = body.get("role")
+
     if role not in ("user", "staff"):
-        return err("INVALID_ROLE", "role ต้องเป็น user หรือ staff", 422)
-    if u["email"] == me["email"] and role != "staff":
-        return err("SELF_DEMOTE", "ลดสิทธิ์ตัวเองไม่ได้", 409)
-    u["role"] = role
-    return {"user": _public(u)}
+        conn.close()
+        return err(
+            "INVALID_ROLE",
+            "role ต้องเป็น user หรือ staff",
+            422
+        )
+
+    if key == me["email"] and role != "staff":
+        conn.close()
+        return err(
+            "SELF_DEMOTE",
+            "ลดสิทธิ์ตัวเองไม่ได้",
+            409
+        )
+
+    conn.execute("""
+        UPDATE users
+        SET role = ?
+        WHERE email = ?
+    """, (role, key))
+
+    conn.commit()
+
+    row = conn.execute("""
+        SELECT *
+        FROM users
+        WHERE email = ?
+    """, (key,)).fetchone()
+
+    conn.close()
+
+    return {
+        "user": _public(dict(row))
+    }
 
 
 @app.delete("/api/v1/admin/users/{key}", status_code=204)
-async def admin_delete(key: str, me: dict = Depends(staff_only)):
+async def admin_delete(
+    key: str,
+    me: dict = Depends(staff_only)
+):
+
     if key == me["email"]:
-        return err("SELF_DELETE", "ลบบัญชีตัวเองไม่ได้", 409)
-    if key not in USERS:
-        return err("USER_NOT_FOUND", "ไม่พบผู้ใช้", 404)
-    USERS.pop(key)
-    NOTES.pop(key, None)
-    PREFS.pop(key, None)
+        return err(
+            "SELF_DELETE",
+            "ลบบัญชีตัวเองไม่ได้",
+            409
+        )
+
+    conn = sqlite3.connect(DB)
+
+    row = conn.execute("""
+        SELECT email
+        FROM users
+        WHERE email = ?
+    """, (key,)).fetchone()
+
+    if not row:
+        conn.close()
+        return err(
+            "USER_NOT_FOUND",
+            "ไม่พบผู้ใช้",
+            404
+        )
+
+    # ลบ Notes ของ user
+    conn.execute("""
+        DELETE FROM notes
+        WHERE email = ?
+    """, (key,))
+
+    # ลบ Preferences ของ user
+    conn.execute("""
+        DELETE FROM preferences
+        WHERE email = ?
+    """, (key,))
+
+    # ลบ User
+    conn.execute("""
+        DELETE FROM users
+        WHERE email = ?
+    """, (key,))
+
+    conn.commit()
+    conn.close()
+
     return Response(status_code=204)
 
 # ก่อนส่งงานจริงต้องลบบล็อกนี้ทิ้ง หรือเปลี่ยนรหัสผ่าน — ตอนนี้รหัสอยู่ในโค้ดแบบเปิดเผย และ repo เป็น Public อยู่
 @app.on_event("startup")
 async def seed_staff():
+
     email = "staff@example.com"
-    if email not in USERS:
-        USERS[email] = {
-            "name": "เจ้าหน้าที่ระบบ", "email": email,
-            "pw": _hash("Staff1234"), "role": "staff",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        print(f"[seed] staff = {email} / Staff1234")
+
+    conn = sqlite3.connect(DB)
+
+    row = conn.execute("""
+        SELECT email
+        FROM users
+        WHERE email = ?
+    """, (email,)).fetchone()
+
+    if not row:
+
+        conn.execute("""
+            INSERT INTO users
+            (email, name, pw, role, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            email,
+            "เจ้าหน้าที่ระบบ",
+            _hash("Staff1234"),
+            "staff",
+            datetime.now(timezone.utc).isoformat()
+        ))
+
+        conn.commit()
+
+        print(f"[seed] staff = {email}")
+
+    conn.close()
 
 
