@@ -87,3 +87,8 @@ uvicorn fake:app --host 127.0.0.1 --port 5050 --reload
 cd C:\Degree\Degree3\310-3311_Image-Processing_69\Project_im\Image_Page
 python proxy.py user
 python proxy.py admin
+
+:: 4) รัน nginx backend
+cd C:\nginx-1.31.6\
+เปิด .\nginx.exe
+ปิด .\nginx.exe -s quit
