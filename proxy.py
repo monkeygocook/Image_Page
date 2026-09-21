@@ -16,7 +16,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent
-BACKEND = "http://127.0.0.1:5050"
+BACKEND = "http://172.20.56.154:5050"
 HOP = {"content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"}
 
 TARGETS = {
@@ -64,4 +64,4 @@ if __name__ == "__main__":
     if not t["dir"].is_dir():
         sys.exit(f"ไม่พบโฟลเดอร์: {t['dir']}")
     print(f"[{which}] {t['dir'].name}  ->  http://127.0.0.1:{t['port']}   api -> {BACKEND}")
-    uvicorn.run(build(t["dir"]), host="127.0.0.1", port=t["port"])
+    uvicorn.run(build(t["dir"]), host="0.0.0.0", port=t["port"])
