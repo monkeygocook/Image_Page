@@ -1,3 +1,4 @@
+import patch
 from services.generator import generate_image
 from pydantic import BaseModel
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -5,6 +6,7 @@ from fastapi.responses import Response
 
 from services.background import remove_background
 from services.blur import background_blur, face_blur, gaussian_blur
+from services.cleaner import clean_image
 
 app = FastAPI()
 
@@ -29,6 +31,28 @@ async def remove_bg(
     image_bytes = await image.read()
 
     result = remove_background(image_bytes)
+
+    return Response(
+        content=result,
+        media_type="image/png"
+    )
+
+
+@app.post("/clean-image")
+async def clean_image_endpoint(
+    image: UploadFile = File(...),
+    mask: UploadFile = File(...),
+    mode: str = Form("object")
+):
+    image_bytes = await image.read()
+    mask_bytes = await mask.read()
+
+    try:
+        result = clean_image(image_bytes, mask_bytes, mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_CLEAN_REQUEST", "message": str(exc)}
+        }) from exc
 
     return Response(
         content=result,
