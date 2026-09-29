@@ -177,7 +177,7 @@ const Api = (() => {
         try { return JSON.parse(localStorage.getItem(STORE + "users") || "[]"); }
         catch { return []; }
     };
-    const saveMockUsers = (list) => localStorage.setItem(STORE + "users", JSON.stringify(list));
+    const saveUseMockrs = (list) => localStorage.setItem(STORE + "users", JSON.stringify(list));
 
     /* ⚠️ djb2 ไม่ใช่ cryptographic hash — ใช้ได้เฉพาะโหมด mock
        ระบบจริงต้องแฮชที่หลังบ้านด้วย argon2id หรือ bcrypt (cost >= 12)
@@ -541,17 +541,17 @@ const Api = (() => {
 
         async list() {
             if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
-            if (isMock()) {
+            /*if (isMock()) {
                 await sleep(150);
                 return mockUsers().map(publicUser);
-            }
+            }*/
             const j = await request(ENDPOINTS.adminUsers);
             return Array.isArray(j) ? j : (j?.users || []);
         },
 
         async setRole(key, role) {
             if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
-            if (isMock()) {
+            /*if (isMock()) {
                 await sleep(150);
                 const meNow = Session.load();
                 if (meNow && key === meNow.email) throw new ApiError("SELF_FORBIDDEN");
@@ -564,19 +564,19 @@ const Api = (() => {
                 }
                 target.role = role;
                 saveMockUsers(list);
-                return publicUser(target);
+                return publicUser(target); 
             }
             const j = await request(ENDPOINTS.adminUserRole(key), {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ role }),
             });
-            return j?.user || j;
+            return j?.user || j; */
         },
 
         async remove(key) {
             if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
-            if (isMock()) {
+            /*if (isMock()) {
                 await sleep(150);
                 const meNow = Session.load();
                 if (meNow && key === meNow.email) throw new ApiError("SELF_FORBIDDEN");
@@ -589,8 +589,8 @@ const Api = (() => {
                 saveMockUsers(list.filter((u) => u.email !== key));
                 // ลบข้อมูลส่วนตัวที่ผูกกับอีเมลนี้ด้วย
                 [`${STORE}${key}:notes`, `${STORE}${key}:tabs`].forEach((k) => localStorage.removeItem(k));
-                return true;
-            }
+                return true; 
+            }*/
             await request(ENDPOINTS.adminUser(key), { method: "DELETE", expect: "none" });
             return true;
         },
