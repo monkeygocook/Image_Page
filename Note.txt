@@ -87,8 +87,13 @@ uvicorn fake:app --host 127.0.0.1 --port 5050 --reload
 cd C:\Degree\Degree3\310-3311_Image-Processing_69\Project_im\Image_Page
 python proxy.py user
 python proxy.py admin
+ทดสอบ 8090: staff@example.com / Staff1234
 
 :: 4) รัน nginx backend
 cd C:\nginx-1.31.6\
 เปิด .\nginx.exe
 ปิด .\nginx.exe -s quit
+
+:: 5) เช็กว่าใครถือพอร์ต 8090 อยู่: netstat -ano | findstr :8090
+
+::6)ฆ่าตัวเก็บ Port ให้หมด :taskkill /PID <เลข> /F
