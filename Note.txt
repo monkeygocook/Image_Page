@@ -93,3 +93,8 @@ python proxy.py admin
 cd C:\nginx-1.31.6\
 เปิด .\nginx.exe
 ปิด .\nginx.exe -s quit
+
+แก้ IP ที่ไหนบาง
+mainBackend.py ของ AI
+proxy.py ของ Backend
+Nginx เครื่อง Backend

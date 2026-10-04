@@ -20,7 +20,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent
-BACKEND = os.getenv("BACKEND_URL", "http://192.168.1.68:5050") #IP Backend
+BACKEND = os.getenv("BACKEND_URL", "http://26.23.191.235:5050") #IP Backend
 
 # ไฟล์สูงสุดที่ระบบรับคือ 20 MB + ส่วนหัวของ multipart
 MAX_BODY = 25 * 1024 * 1024
