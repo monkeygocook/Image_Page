@@ -375,9 +375,7 @@ async def put_prefs(
 
     return {"ok": True}
 
-@app.get("/api/v1/health")
-async def health():
-    return {"status": "ok", "version": "1.0.0"}
+
 
 """
 
@@ -435,149 +433,62 @@ async def blur(
     return render(f"BLUR\ntype={blur_type} amount={blur_amount}%")
 
 """
+
+@app.get("/api/v1/health")
+async def health():
+    return {"status": "ok", "version": "1.0.0"}
+
 _ai_client = httpx.AsyncClient(
     base_url=AI_URL,
     timeout=httpx.Timeout(300.0, connect=5.0),  # Forge generate อาจนานหลายสิบวินาที
 )
 
+# ============================================================
+# Pass-through -> PC1 (mainAI.py)
+# backend แค่ตรวจล็อกอิน + ส่ง request ต่อทั้งก้อน
+# mainAI.py เป็นคนเลือกเองว่าจะทำอะไร แล้วส่งผลกลับมา
+# ============================================================
+AI_ROUTES = {
+    "generate":          "/generate",
+    "remove-background": "/remove-background",
+    "blur":              "/blur",
+    "clean-image":       "/clean-image",
+}
+AI_MAX_BODY = 25 * 1024 * 1024
 
-class GenerateIn(BaseModel):
-    prompt: str
-    negative_prompt: str | None = ""
-    seed: int = -1
 
+def _make_ai_forwarder(ai_path: str):
+    async def forward(request: Request, u: dict = Depends(me_user)):
+        body = await request.body()
+        if len(body) > AI_MAX_BODY:
+            return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
 
-@app.post("/api/v1/generate")
-async def generate_ai(req: GenerateIn, u: dict = Depends(me_user)):
-    if not req.prompt.strip():
-        return err("INVALID_PROMPT", "prompt ต้องไม่ว่าง", 422)
+        # ส่ง Content-Type เดิมต่อ (multipart boundary / json) ไม่ต้องแปลงอะไร
+        headers = {"content-type": request.headers.get("content-type", "application/octet-stream")}
 
-    payload = {
-        "prompt": req.prompt,                       # จาก #promptInput
-        "negative_prompt": req.negative_prompt or "",  # จาก #negativeInput
-        "seed": req.seed,
-    }
-
-    try:
-        r = await _ai_client.post("/generate", json=payload)
-    except httpx.TimeoutException:
-        return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
-    except httpx.TransportError:
-        return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
-
-    if r.status_code != 200:
-        # mainAI ส่ง error มาเป็น {"detail": ...}
         try:
-            detail = r.json().get("detail", r.text[:300])
-        except Exception:
-            detail = r.text[:300]
-        return err("AI_ERROR", str(detail), 502 if r.status_code >= 500 else r.status_code)
+            r = await _ai_client.post(ai_path, content=body, headers=headers)
+        except httpx.TimeoutException:
+            return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
+        except httpx.TransportError:
+            return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
 
-    return Response(content=r.content, media_type="image/png")
+        if r.status_code != 200:
+            try:
+                detail = r.json().get("detail", r.text[:300])
+                if isinstance(detail, dict):          # {"error": {"code","message"}}
+                    detail = detail.get("error", {}).get("message", str(detail))
+            except Exception:
+                detail = r.text[:300]
+            return err("AI_ERROR", str(detail), r.status_code)
 
-async def _read_image(image: UploadFile, max_mb: int = 12):
-    """คืน (bytes, None) ถ้าผ่าน หรือ (None, error_response) ถ้าไม่ผ่าน"""
-    if image.content_type not in ACCEPT:
-        return None, err("UNSUPPORTED_TYPE", f"ไม่รองรับชนิดไฟล์: {image.content_type}", 415)
-    data = await image.read()
-    if len(data) > max_mb * 1024 * 1024:
-        return None, err("FILE_TOO_LARGE", f"ไฟล์เกิน {max_mb} MB", 413)
-    return data, None
-
-
-async def _forward_ai(path: str, files: dict, data: dict | None = None):
-    """ส่ง multipart ไป PC1 แล้วคืน PNG กลับ หรือ error ที่อ่านง่าย"""
-    try:
-        r = await _ai_client.post(path, files=files, data=data or {})
-    except httpx.TimeoutException:
-        return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
-    except httpx.TransportError:
-        return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
-
-    if r.status_code != 200:
-        try:
-            detail = r.json().get("detail", r.text[:300])
-        except Exception:
-            detail = r.text[:300]
-        return err("AI_ERROR", str(detail), 502 if r.status_code >= 500 else r.status_code)
-
-    return Response(content=r.content, media_type="image/png")
+        return Response(content=r.content,
+                        media_type=r.headers.get("content-type", "image/png"))
+    return forward
 
 
-# ---------- remove background ----------
-@app.post("/api/v1/remove-background")
-async def remove_background_ai(
-    image: UploadFile = File(...),
-    output: str = Form("transparent"),      # รับไว้เฉยๆ PC1 ไม่ใช้
-    refine_edge: bool = Form(True),         # รับไว้เฉยๆ PC1 ไม่ใช้
-    u: dict = Depends(me_user),
-):
-    data, e = await _read_image(image, 12)
-    if e:
-        return e
-    return await _forward_ai(
-        "/remove-background",
-        files={"image": (image.filename or "image.png", data, image.content_type)},
-    )
-
-
-# ---------- blur ----------
-AI_BLUR_TYPES = {"gaussian", "background", "face"}   # ที่ PC1 รองรับจริง
-
-@app.post("/api/v1/blur")
-async def blur_ai(
-    image: UploadFile = File(...),
-    blur_type: str = Form("gaussian"),
-    blur_amount: int = Form(40),
-    u: dict = Depends(me_user),
-):
-    if blur_type not in AI_BLUR_TYPES:
-        return err("INVALID_BLUR_TYPE", f"ไม่รองรับ blur_type: {blur_type}", 422)
-    if not 0 <= blur_amount <= 100:
-        return err("INVALID_BLUR_AMOUNT", "blur_amount ต้องอยู่ระหว่าง 0–100", 422)
-
-    data, e = await _read_image(image, 12)
-    if e:
-        return e
-    return await _forward_ai(
-        "/blur",
-        files={"image": (image.filename or "image.png", data, image.content_type)},
-        data={"blur_type": blur_type, "blur_amount": str(blur_amount)},
-    )
-
-
-# ---------- clean image (ลบวัตถุ/ลายน้ำ) ----------
-@app.post("/api/v1/clean-image")
-async def clean_image_ai(
-    image: UploadFile = File(...),
-    mask: UploadFile | None = File(None),       # ภาพ mask ขาว = ส่วนที่จะลบ
-    mode: str | None = Form(None),              # "object" | "watermark"
-    remove_watermark: bool | None = Form(None), # เผื่อ frontend เก่ายังส่งมา
-    u: dict = Depends(me_user),
-):
-    if mask is None:
-        return err("MASK_REQUIRED", "ต้องส่ง mask (ระบายบริเวณที่จะลบ) มาด้วย", 422)
-
-    if mode is None:
-        mode = "watermark" if remove_watermark else "object"
-    if mode not in {"object", "watermark"}:
-        return err("INVALID_MODE", f"ไม่รองรับ mode: {mode}", 422)
-
-    data, e = await _read_image(image, 12)
-    if e:
-        return e
-    mask_data, e = await _read_image(mask, 12)
-    if e:
-        return e
-
-    return await _forward_ai(
-        "/clean-image",
-        files={
-            "image": (image.filename or "image.png", data, image.content_type),
-            "mask": (mask.filename or "mask.png", mask_data, mask.content_type),
-        },
-        data={"mode": mode},
-    )
+for _name, _ai_path in AI_ROUTES.items():
+    app.add_api_route(f"/api/v1/{_name}", _make_ai_forwarder(_ai_path), methods=["POST"])
 
 
 
