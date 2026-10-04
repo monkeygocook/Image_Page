@@ -2,7 +2,7 @@ server {
     listen 5050;
     server_name _;
 
-    allow 172.20.56.250;          # เฉพาะเครื่อง frontend
+    allow 192.168.1.68;          # เฉพาะเครื่อง frontend
     deny  all;
 
     client_max_body_size 25m;
