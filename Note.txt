@@ -90,6 +90,7 @@ python proxy.py user
 python proxy.py admin
 
 :: 4) รัน nginx backend
+"C:\nginx-1.31.6\conf\nginx.conf"
 cd C:\nginx-1.31.6\
 เปิด .\nginx.exe
 ปิด .\nginx.exe -s quit
