@@ -81,7 +81,8 @@ pip install httpx uvicorn starlette fastapi pillow python-multipart
 
 :: 1) Backend
 cd C:\Degree\Degree3\310-3311_Image-Processing_69\Project_im\Image_Page\backend
-uvicorn fake:app --host 127.0.0.1 --port 5050 --reload
+#NOTUSE uvicorn fake:app --host 127.0.0.1 --port 5050 --reload
+uvicorn mainBackend:app --host 127.0.0.1 --port 5051
 
 :: 2) ผู้ใช้ + 3) แอดมิน  (รันจาก repo root)
 cd C:\Degree\Degree3\310-3311_Image-Processing_69\Project_im\Image_Page
@@ -90,6 +91,7 @@ python proxy.py admin
 ทดสอบ 8090: staff@example.com / Staff1234
 
 :: 4) รัน nginx backend
+"C:\nginx-1.31.6\conf\nginx.conf"
 cd C:\nginx-1.31.6\
 เปิด .\nginx.exe
 ปิด .\nginx.exe -s quit
@@ -97,3 +99,8 @@ cd C:\nginx-1.31.6\
 :: 5) เช็กว่าใครถือพอร์ต 8090 อยู่: netstat -ano | findstr :8090
 
 ::6)ฆ่าตัวเก็บ Port ให้หมด :taskkill /PID <เลข> /F
+
+แก้ IP ที่ไหนบาง และใช้ Radmin ทั้งหมดเพืืป้องกันการเข้าถึงโดยตรงจากภายนอก
+mainBackend.py ของ AI
+proxy.py ของ Backend
+Nginx เครื่อง Backend ของ Frontend

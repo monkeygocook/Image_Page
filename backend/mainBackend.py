@@ -12,10 +12,15 @@ from datetime import datetime, timezone
 from fastapi import Depends
 import sqlite3
 
+import os
+import httpx
+
 #uvicorn fake:app --host 172.20.56.154 --port 5050 --reload
 #uvicorn fake:app --host 0.0.0.0 --port 5050 --proxy-headers --forwarded-allow-ips=172.20.56.250
 #uvicorn fake:app --host 0.0.0.0 --port 5050 --no-proxy-headers --no-access-log
-#uvicorn fake:app --host 127.0.0.1 --port 5051
+#uvicorn mainBackend:app --host 127.0.0.1 --port 5051
+
+AI_URL = os.getenv("AI_URL", "http://172.20.56.100:8000").rstrip("/")  # <- ใส่ IP ของ AI
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")
@@ -370,9 +375,9 @@ async def put_prefs(
 
     return {"ok": True}
 
-@app.get("/api/v1/health")
-async def health():
-    return {"status": "ok", "version": "1.0.0"}
+
+
+"""
 
 @app.post("/api/v1/generate")
 async def generate(req: GenerateRequest):
@@ -426,6 +431,74 @@ async def blur(
     await image.read()
     await asyncio.sleep(0.8)
     return render(f"BLUR\ntype={blur_type} amount={blur_amount}%")
+
+"""
+
+@app.get("/api/v1/health")
+async def health():
+    return {"status": "ok", "version": "1.0.0"}
+
+_ai_client = httpx.AsyncClient(
+    base_url=AI_URL,
+    timeout=httpx.Timeout(300.0, connect=5.0),  # Forge generate อาจนานหลายสิบวินาที
+)
+
+# ============================================================
+# Pass-through -> PC1 (mainAI.py)
+# backend แค่ตรวจล็อกอิน + ส่ง request ต่อทั้งก้อน
+# mainAI.py เป็นคนเลือกเองว่าจะทำอะไร แล้วส่งผลกลับมา
+# ============================================================
+AI_ROUTES = {
+    "generate":          "/generate",
+    "remove-background": "/remove-background",
+    "blur":              "/blur",
+    "clean-image":       "/clean-image",
+}
+AI_MAX_BODY = 25 * 1024 * 1024
+
+
+def _make_ai_forwarder(ai_path: str):
+    async def forward(request: Request, u: dict = Depends(me_user)):
+        body = await request.body()
+        if len(body) > AI_MAX_BODY:
+            return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
+
+        # ส่ง Content-Type เดิมต่อ (multipart boundary / json) ไม่ต้องแปลงอะไร
+        headers = {"content-type": request.headers.get("content-type", "application/octet-stream")}
+
+        try:
+            r = await _ai_client.post(ai_path, content=body, headers=headers)
+        except httpx.TimeoutException:
+            return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
+        except httpx.TransportError:
+            return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
+
+        if r.status_code != 200:
+            try:
+                detail = r.json().get("detail", r.text[:300])
+                if isinstance(detail, dict):          # {"error": {"code","message"}}
+                    detail = detail.get("error", {}).get("message", str(detail))
+            except Exception:
+                detail = r.text[:300]
+            return err("AI_ERROR", str(detail), r.status_code)
+
+        return Response(content=r.content,
+                        media_type=r.headers.get("content-type", "image/png"))
+    return forward
+
+
+for _name, _ai_path in AI_ROUTES.items():
+    app.add_api_route(f"/api/v1/{_name}", _make_ai_forwarder(_ai_path), methods=["POST"])
+
+
+
+
+
+
+
+
+
+
 def staff_only(u: dict = Depends(me_user)) -> dict:
     if u["role"] != "staff":
         raise HTTPException(403, "ต้องเป็นเจ้าหน้าที่เท่านั้น")

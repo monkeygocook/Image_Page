@@ -20,7 +20,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent
-BACKEND = os.getenv("BACKEND_URL", "http://127.0.0.1:5050") # http://127.0.0.1:5050 / http://172.20.56.154:5050
+BACKEND = os.getenv("BACKEND_URL", "http://26.23.191.235:5050") #IP Backend
 
 # ไฟล์สูงสุดที่ระบบรับคือ 20 MB + ส่วนหัวของ multipart
 MAX_BODY = 25 * 1024 * 1024
@@ -40,7 +40,7 @@ TARGETS = {
 }
 
 # connect=5: ถ้าหลังบ้านไม่ตอบ (ล่ม/โดนบล็อก) รู้ใน 5 วินาที ไม่ต้องรอ 180
-client = httpx.AsyncClient(base_url=BACKEND, timeout=httpx.Timeout(180.0, connect=5.0))
+client = httpx.AsyncClient(base_url=BACKEND, timeout=httpx.Timeout(300.0, connect=5.0))
 
 
 def error(code: str, message: str, status: int) -> JSONResponse:
