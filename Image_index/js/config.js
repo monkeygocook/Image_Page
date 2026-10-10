@@ -449,9 +449,7 @@ const TAB_CONFIG = {
                     { v: "gaussian", th: "ทั้งภาพ", en: "Gaussian" },
                     { v: "background", th: "เฉพาะพื้นหลัง", en: "Background" },
                     { v: "face", th: "เฉพาะใบหน้า", en: "Face" },
-                    { v: "motion", th: "เคลื่อนไหว", en: "Motion" },
-                    { v: "pixelate", th: "โมเสก", en: "Pixelate" },
-                    { v: "radial", th: "รัศมี", en: "Radial" },
+                    /* { v: "pixelate", th: "โมเสก", en: "Pixelate" }, */
                 ],
             },
             blur_amount: {
