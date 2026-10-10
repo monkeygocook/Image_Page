@@ -366,23 +366,43 @@ const TAB_CONFIG = {
         },
     },
     icon: {
-        label: "Icon", type: "img2img",
+        label: "Adjust", type: "img2img",
         usesPrompt: false, needsFile: true,
-        endpoint: "/api/v1/clean-image", contentType: "multipart/form-data",
-        cta: { th: "ลบลายน้ำ & นอยส์", en: "Clean Image" },
-        hint: { th: "ภาพที่มีลายน้ำหรือนอยส์ · ไม่เกิน 12 MB", en: "Watermarked or noisy image · max 12 MB" },
+        endpoint: "/api/v1/adjust", contentType: "multipart/form-data",
+        cta: { th: "ปรับภาพ", en: "Adjust" },
+        hint: {
+            th: "PNG / JPG / WEBP · ไม่เกิน 12 MB", en: "PNG / JPG / WEBP · max12 MB"
+        },
         accept: ["image/png", "image/jpeg", "image/webp"], maxMB: 12,
         returns: "image/png",
         fields: {
-            denoise: {
-                kind: "enum", label: { th: "ระดับลดนอยส์", en: "Denoise" }, default: "medium",
-                values: [
-                    { v: "low", th: "เบา", en: "Low" },
-                    { v: "medium", th: "กลาง", en: "Medium" },
-                    { v: "high", th: "แรง", en: "High" },
-                ],
+            brightness: {
+                kind: "range", label: {
+                    th: "ความสว่าง", en:
+                        "Brightness"
+                }, min: -100, max: 100, step: 5, default: 0
             },
-            remove_watermark: { kind: "bool", label: { th: "ลบลายน้ำ", en: "Remove watermark" }, default: true },
+            contrast: {
+                kind: "range", label: {
+                    th: "คอนทราสต์", en: "Contrast"
+                }, min: -100, max: 100, step: 5, default: 0
+            },
+            saturation: {
+                kind: "range", label: {
+                    th: "ความสดของสี", en:
+                        "Saturation"
+                }, min: -100, max: 100, step: 5, default: 0
+            },
+            temperature: {
+                kind: "range", label: {
+                    th: "อุณหภูมิสี", en:
+                        "Temperature"
+                }, min: -100, max: 100, step: 5, default: 0
+            },
+            vignette: {
+                kind: "range", label: { th: "ขอบมืด", en: "Vignette" },
+                min: -100, max: 100, step: 5, default: 0
+            },
         },
     },
     tone: {
