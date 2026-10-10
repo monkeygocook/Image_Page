@@ -98,6 +98,7 @@ async def add_request_id(request: Request, call_next):
     resp.headers["X-Request-Id"] = rid
     return resp
 
+#เส้นทางที่ทำให้ handler นี้ทำงานได้จริงมีแค่ register, login, put_notes, put_prefs
 @app.exception_handler(RequestValidationError)
 async def on_validation_error(request: Request, exc: RequestValidationError):
     # รายละเอียดจริงเก็บใน log เท่านั้น
@@ -107,6 +108,7 @@ async def on_validation_error(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(StarletteHTTPException)
 async def on_http_error(request: Request, exc: StarletteHTTPException):
+    log.info("HTTPException %s %s -> %s", request.method, request.url.path, exc.status_code)
     if exc.status_code >= 500:
         log.error("http %s %s %s: %s", exc.status_code, request.method, request.url.path, exc.detail)
     code, msg = HTTP_ERR_MAP.get(exc.status_code, ("INTERNAL_ERROR", "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่"))
