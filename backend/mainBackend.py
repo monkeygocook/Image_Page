@@ -449,10 +449,11 @@ _ai_client = httpx.AsyncClient(
 # mainAI.py เป็นคนเลือกเองว่าจะทำอะไร แล้วส่งผลกลับมา
 # ============================================================
 AI_ROUTES = {
-    "generate":          "/generate",
     "remove-background": "/remove-background",
+    "generate":          "/generate",
+    "adjust":            "/adjust",
+    "filter":            "/filter",
     "blur":              "/blur",
-    "clean-image":       "/clean-image",
 }
 AI_MAX_BODY = 25 * 1024 * 1024
 
