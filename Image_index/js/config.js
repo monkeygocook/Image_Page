@@ -408,24 +408,29 @@ const TAB_CONFIG = {
     tone: {
         label: "Tone", type: "img2img",
         usesPrompt: false, needsFile: true,
-        endpoint: "/api/v1/color-grade", contentType: "multipart/form-data",
+        endpoint: "/api/v1/filter", contentType: "multipart/form-data",
         cta: { th: "ปรับโทนสี", en: "Color Grade" },
         hint: { th: "PNG / JPG / WEBP · ไม่เกิน 20 MB", en: "PNG / JPG / WEBP · max 20 MB" },
         accept: ["image/png", "image/jpeg", "image/webp"], maxMB: 20,
-        returns: "image/jpeg",
+        returns: "image/png",
         fields: {
-            tone: {
+            filter_name: {
                 kind: "enum", label: { th: "โทนสี", en: "Tone" }, default: "warm",
                 values: [
                     { v: "warm", th: "อบอุ่น", en: "Warm" },
                     { v: "cool", th: "เย็น", en: "Cool" },
-                    { v: "pastel", th: "พาสเทล", en: "Pastel" },
-                    { v: "mono", th: "ขาวดำ", en: "Mono" },
+                    { v: "sepia", th: "ซีเปีย", en: "sepia" },
+                    { v: "grayscale", th: "ขาวดำ", en: "grayscale" },
                     { v: "vivid", th: "สดจัด", en: "Vivid" },
                     { v: "cinematic", th: "ภาพยนตร์", en: "Cinematic" },
+                    { v: "vintage", th: "โบราณ", en: "Vintage" },
+                    { v: "sharpen", th: "คม", en: "Sharpen" },
+                    { v: "sketch", th: "สเก็ตช์", en: "Sketch" },
+                    { v: "cartoon", th: "การ์ตูน", en: "Cartoon" },
+
                 ],
             },
-            strength: { kind: "range", label: { th: "ความเข้ม", en: "Strength" }, min: 0, max: 100, step: 5, default: 70, suffix: "%" },
+            intensity: { kind: "range", label: { th: "ความเข้ม", en: "intensity" }, min: 0, max: 100, step: 5, default: 70, suffix: "%" },
         },
     },
     blur: {
