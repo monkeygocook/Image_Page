@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from PIL import Image, ImageDraw
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.datastructures import UploadFile as StarletteUpload
 from contextvars import ContextVar
 import base64, hmac, hashlib, json, time
 from fastapi import Header, HTTPException
@@ -15,11 +16,19 @@ import sqlite3
 import os
 import httpx
 
+import logging
+log = logging.getLogger("backend")
+
+
 #uvicorn fake:app --host 172.20.56.154 --port 5050 --reload
 #uvicorn fake:app --host 0.0.0.0 --port 5050 --proxy-headers --forwarded-allow-ips=172.20.56.250
 #uvicorn fake:app --host 0.0.0.0 --port 5050 --no-proxy-headers --no-access-log
 #uvicorn mainBackend:app --host 127.0.0.1 --port 5051
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 AI_URL = os.getenv("AI_URL", "http://172.20.56.100:8000").rstrip("/")  # <- ใส่ IP ของ AI
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
@@ -67,8 +76,16 @@ def init_db():
 
 init_db()
 
-#from guard import install_guard
-#install_guard(app)
+HTTP_ERR_MAP = {
+    400: ("VALIDATION_ERROR", "คำขอไม่ถูกต้อง"),
+    401: ("UNAUTHORIZED", "กรุณาเข้าสู่ระบบ"),
+    403: ("FORBIDDEN", "บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้"),
+    404: ("NOT_FOUND", "ไม่พบข้อมูลที่ต้องการ"),
+    405: ("NOT_FOUND", "ไม่พบข้อมูลที่ต้องการ"),
+    413: ("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด"),
+    415: ("INVALID_FILE_TYPE", "ชนิดไฟล์ไม่รองรับ"),
+    429: ("RATE_LIMITED", "ใช้งานถี่เกินไป กรุณารอสักครู่"),
+}
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
@@ -81,19 +98,26 @@ async def add_request_id(request: Request, call_next):
     resp.headers["X-Request-Id"] = rid
     return resp
 
+#เส้นทางที่ทำให้ handler นี้ทำงานได้จริงมีแค่ register, login, put_notes, put_prefs
 @app.exception_handler(RequestValidationError)
 async def on_validation_error(request: Request, exc: RequestValidationError):
-    e = (exc.errors() or [{}])[0]
-    field = ".".join(str(x) for x in e.get("loc", [])[1:]) or "body"
-    return err("VALIDATION_ERROR", f"{field}: {e.get('msg', 'invalid')}", 422)
+    # รายละเอียดจริงเก็บใน log เท่านั้น
+    safe = [{"loc": e.get("loc"), "type": e.get("type")} for e in exc.errors()]
+    log.warning("validation %s %s: %s", request.method, request.url.path, safe)
+    return err("VALIDATION_ERROR", "ข้อมูลที่ส่งมาไม่ถูกต้อง", 422)
 
 @app.exception_handler(StarletteHTTPException)
 async def on_http_error(request: Request, exc: StarletteHTTPException):
-    return err(f"HTTP_{exc.status_code}", str(exc.detail), exc.status_code)
+    log.info("HTTPException %s %s -> %s", request.method, request.url.path, exc.status_code)
+    if exc.status_code >= 500:
+        log.error("http %s %s %s: %s", exc.status_code, request.method, request.url.path, exc.detail)
+    code, msg = HTTP_ERR_MAP.get(exc.status_code, ("INTERNAL_ERROR", "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่"))
+    return err(code, msg, exc.status_code)
 
 @app.exception_handler(Exception)
 async def on_unhandled(request: Request, exc: Exception):
-    return err("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+    log.exception("unhandled error: %s %s", request.method, request.url.path)
+    return err("INTERNAL_ERROR", "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่", 500)
 
 PLACEHOLDER = "https://placehold.co/768x768/png?text=Fake+Result"
 
@@ -375,64 +399,9 @@ async def put_prefs(
 
     return {"ok": True}
 
-
-
-"""
-
-@app.post("/api/v1/generate")
-async def generate(req: GenerateRequest):
-    if not req.prompt.strip():
-        return err("INVALID_PROMPT", "prompt ต้องไม่ว่าง")
-    await asyncio.sleep(0.8)
-    return render(f"GENERATE\n{req.prompt[:60]}")
-
-@app.post("/api/v1/remove-background")
-async def remove_background(
-    image: UploadFile = File(...),
-    output: str = Form("transparent"),
-    refine_edge: bool = Form(True),
-):
-    if (e := await check_image(image, 12)): return e
-    await asyncio.sleep(0.8)
-    return render(f"REMOVE-BG\noutput={output} refine={refine_edge}")
-
-@app.post("/api/v1/clean-image")
-async def clean_image(
-    image: UploadFile = File(...),
-    denoise: str = Form("medium"),
-    remove_watermark: bool = Form(True),
-):
-    await image.read()
-    await asyncio.sleep(0.8)
-    return render(f"CLEAN\ndenoise={denoise} wm={remove_watermark}")
-
-@app.post("/api/v1/color-grade")
-async def color_grade(
-    image: UploadFile = File(...),
-    tone: str = Form("warm"),
-    strength: int = Form(70),
-):
-    if not 0 <= strength <= 100:
-        return err("INVALID_STRENGTH", "strength ต้องอยู่ระหว่าง 0–100")
-    await image.read()
-    await asyncio.sleep(0.8)
-    return render(f"TONE\ntone={tone} strength={strength}%", media="image/jpeg")
-
-@app.post("/api/v1/blur")
-async def blur(
-    image: UploadFile = File(...),
-    blur_type: str = Form("gaussian"),
-    blur_amount: int = Form(40),
-):
-    if blur_type not in {"gaussian", "background", "face", "motion", "pixelate", "radial"}:
-        return err("INVALID_BLUR_TYPE", f"ไม่รองรับ blur_type: {blur_type}")
-    if not 0 <= blur_amount <= 100:
-        return err("INVALID_BLUR_AMOUNT", "blur_amount ต้องอยู่ระหว่าง 0–100")
-    await image.read()
-    await asyncio.sleep(0.8)
-    return render(f"BLUR\ntype={blur_type} amount={blur_amount}%")
-
-"""
+# ============================================================
+# AI Pass-through
+# ============================================================
 
 @app.get("/api/v1/health")
 async def health():
@@ -456,10 +425,51 @@ AI_ROUTES = {
     "blur":              "/blur",
 }
 AI_MAX_BODY = 25 * 1024 * 1024
+ACCEPT = {"image/png", "image/jpeg", "image/webp"}
+# endpoint -> (ต้องมีไฟล์ไหม, เพดาน MB)
+AI_RULES = {
+    "remove-background": (True, 12),
+    "blur":              (True, 20),
+    "adjust":            (True, 20),
+    "filter":            (True, 20),
+    "generate":          (False, 0),
+}
 
+# status จาก AI -> (code, ข้อความที่ผู้ใช้เห็น)
+AI_ERR_MAP = {
+    422: ("UNPROCESSABLE_IMAGE", "ไม่สามารถประมวลผลภาพนี้ได้"),
+    503: ("MODEL_UNAVAILABLE", "ระบบสร้างภาพยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง"),
+}
+AI_ERR_DEFAULT = ("INTERNAL_ERROR", "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่")
 
-def _make_ai_forwarder(ai_path: str):
+def _make_ai_forwarder(name: str, ai_path: str):
+    needs_file, max_mb = AI_RULES[name]
     async def forward(request: Request, u: dict = Depends(me_user)):
+        ctype = request.headers.get("content-type", "")
+
+        # กันก่อนอ่าน body: ดู Content-Length ก่อน จะได้ไม่โหลดไฟล์ยักษ์เข้าแรม
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > AI_MAX_BODY:
+            return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
+
+        body = await request.body()
+        if len(body) > AI_MAX_BODY:
+            return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
+
+        if needs_file:
+            if not ctype.startswith("multipart/form-data"):
+                return err("VALIDATION_ERROR", "ต้องส่งเป็น multipart/form-data", 415)
+            form = await request.form()          # แกะจาก body ที่แคชไว้แล้ว
+            f = form.get("image")
+            if not isinstance(f, StarletteUpload):
+                return err("VALIDATION_ERROR", "ไม่พบไฟล์ภาพในฟิลด์ image", 422)
+            if f.content_type not in ACCEPT:
+                return err("INVALID_FILE_TYPE", f"ไม่รองรับชนิดไฟล์: {f.content_type}", 415)
+            f.file.seek(0, 2)
+            size = f.file.tell()
+            if size > max_mb * 1024 * 1024:
+                return err("FILE_TOO_LARGE", f"ไฟล์เกิน {max_mb} MB", 413)
+        # ... ส่งต่อเหมือนเดิม
         body = await request.body()
         if len(body) > AI_MAX_BODY:
             return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
@@ -469,28 +479,26 @@ def _make_ai_forwarder(ai_path: str):
 
         try:
             r = await _ai_client.post(ai_path, content=body, headers=headers)
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as exc:
+            log.error("AI timeout %s: %r", ai_path, exc)
             return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
-        except httpx.TransportError:
+        except httpx.TransportError as exc:
+            log.error("AI down %s: %r", ai_path, exc)
             return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
 
         if r.status_code != 200:
-            try:
-                detail = r.json().get("detail", r.text[:300])
-                if isinstance(detail, dict):          # {"error": {"code","message"}}
-                    detail = detail.get("error", {}).get("message", str(detail))
-            except Exception:
-                detail = r.text[:300]
-            return err("AI_ERROR", str(detail), r.status_code)
+            # รายละเอียดจริงเก็บใน log เท่านั้น ไม่ส่งให้ผู้ใช้
+            log.error("AI %s -> HTTP %s: %s", ai_path, r.status_code, r.text[:500])
+            code, msg = AI_ERR_MAP.get(r.status_code, AI_ERR_DEFAULT)
+            http = r.status_code if r.status_code in AI_ERR_MAP else 502
+            return err(code, msg, http)
 
         return Response(content=r.content,
                         media_type=r.headers.get("content-type", "image/png"))
     return forward
 
-
 for _name, _ai_path in AI_ROUTES.items():
-    app.add_api_route(f"/api/v1/{_name}", _make_ai_forwarder(_ai_path), methods=["POST"])
-
+    app.add_api_route(f"/api/v1/{_name}", _make_ai_forwarder(_name, _ai_path), methods=["POST"])
 
 
 
