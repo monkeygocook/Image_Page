@@ -1,11 +1,10 @@
 rembg
 pillow
-opencv-python-headless
+opencv-python-headless<5
 numpy
 simple-lama-inpainting
 fastapi
 uvicorn
 python-multipart
-
 requests
 pydantic

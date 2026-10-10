@@ -6,7 +6,8 @@ from fastapi.responses import Response
 
 from services.background import remove_background
 from services.blur import background_blur, face_blur, gaussian_blur
-from services.cleaner import clean_image
+from services.Filter import FILTERS, apply_filter
+from services.adjust import adjust_image
 
 app = FastAPI()
 
@@ -38,28 +39,6 @@ async def remove_bg(
     )
 
 
-@app.post("/clean-image")
-async def clean_image_endpoint(
-    image: UploadFile = File(...),
-    mask: UploadFile = File(...),
-    mode: str = Form("object")
-):
-    image_bytes = await image.read()
-    mask_bytes = await mask.read()
-
-    try:
-        result = clean_image(image_bytes, mask_bytes, mode)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={
-            "error": {"code": "INVALID_CLEAN_REQUEST", "message": str(exc)}
-        }) from exc
-
-    return Response(
-        content=result,
-        media_type="image/png"
-    )
-
-
 class GenerateRequest(BaseModel):
     prompt: str
     negative_prompt: str = ""
@@ -78,6 +57,63 @@ def generate(req: GenerateRequest):
 
     return Response(
         content=image,
+        media_type="image/png"
+    )
+
+
+@app.post("/adjust")
+async def adjust_endpoint(
+    image: UploadFile = File(...),
+    brightness: int = Form(0),
+    contrast: int = Form(0),
+    saturation: int = Form(0),
+    temperature: int = Form(0),
+    vignette: int = Form(0)
+):
+    image_bytes = await image.read()
+
+    try:
+        result = adjust_image(
+            image_bytes, brightness, contrast, saturation, temperature, vignette
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_ADJUST_REQUEST", "message": str(exc)}
+        }) from exc
+
+    return Response(
+        content=result,
+        media_type="image/png"
+    )
+
+
+@app.post("/filter")
+async def filter_image(
+    image: UploadFile = File(...),
+    filter_name: str = Form("grayscale"),
+    intensity: int = Form(100)
+):
+    if filter_name not in FILTERS:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_FILTER", "message": f"Unsupported filter_name: {filter_name}"}
+        })
+
+    if not -100 <= intensity <= 100:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_INTENSITY", "message": "intensity must be between -100 and 100"}
+        })
+
+    image_bytes = await image.read()
+
+    try:
+        result = apply_filter(image_bytes, filter_name, intensity)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_IMAGE", "message": str(exc)}
+        }) from exc
+
+    return Response(
+        content=result,
         media_type="image/png"
     )
 
