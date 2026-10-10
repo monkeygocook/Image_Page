@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-import fake
+import mainBackend as fake
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTER = "/api/v1/auth/register"
