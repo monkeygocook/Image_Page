@@ -1,8 +1,17 @@
+# VS Code
+.vscode/
+
+# Python
 __pycache__/
 *.py[cod]
-.venv/
 venv/
+.venv/
 .env
+
+# ฐานข้อมูล (มีข้อมูลผู้ใช้ ไม่ควรขึ้น repo)
+*.db
+
+# ระบบ
 .DS_Store
 Thumbs.db
 *.log
