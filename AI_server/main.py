@@ -31,7 +31,12 @@ async def remove_bg(
 ):
     image_bytes = await image.read()
 
-    result = remove_background(image_bytes)
+    try:
+        result = remove_background(image_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_IMAGE", "message": str(exc)}
+        }) from exc
 
     return Response(
         content=result,
