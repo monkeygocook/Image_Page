@@ -2,11 +2,10 @@ import base64
 import os
 
 import logging
+log = logging.getLogger("generator")
 
 import requests
 from requests.exceptions import RequestException
-
-log = logging.getLogger("generator")
 
 FORGE_URL = os.getenv("FORGE_URL", "http://127.0.0.1:7860").rstrip("/")
 
