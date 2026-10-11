@@ -483,34 +483,35 @@ async def _prepare(request: Request, name: str):
     return body, (ctype or "application/octet-stream"), opts
 
 def _make_ai_forwarder(name: str, ai_path: str):
-    needs_file, max_mb = AI_RULES[name]
+    """Compatibility endpoint: preserve the old image response, but run via the job queue."""
     async def forward(request: Request, u: dict = Depends(me_user)):
+        # Direct-style URLs are also queued, so every AI operation uses _slots.
+        if any(JOBS[i].owner == u["email"] for i in QUEUE):
+            return err("JOB_ACTIVE", "คุณมีงานที่กำลังทำอยู่แล้ว", 409)
+        if len(QUEUE) >= AI_CONCURRENCY + MAX_WAITING:
+            return err("QUEUE_FULL", "คิวเต็ม กรุณาลองใหม่ภายหลัง", 503)
+
         p = await _prepare(request, name)
-        if isinstance(p, JSONResponse): return p
+        if isinstance(p, JSONResponse):
+            return p
         body, ctype, opts = p
 
         ip = request.client.host if request.client else "-"
-        log.info("START %s user=%s ip=%s size=%.2fMB opts=%s", name, u["email"], ip, len(body) / 1048576, opts)
-        t0 = time.time()
-        try:
-            r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
-        except httpx.TimeoutException as exc:
-            log.error("FAIL  %s user=%s ip=%s -> AI timeout %.1fs %r", name, u["email"], ip, time.time() - t0, exc)
-            return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
-        except httpx.TransportError as exc:
-            log.error("FAIL  %s user=%s ip=%s -> AI down %.1fs %r", name, u["email"], ip, time.time() - t0, exc)
-            return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
+        j = Job(u["email"], name)
+        JOBS[j.id] = j
+        QUEUE.append(j.id)
+        j.task = asyncio.create_task(_run_job(j, ai_path, body, ctype, ip))
+        log.info("JOB NEW %s user=%s ip=%s opts=%s queue=%d", name, u["email"], ip, opts, len(QUEUE))
 
-        if r.status_code != 200:
-            # รายละเอียดจริงเก็บใน log เท่านั้น ไม่ส่งให้ผู้ใช้
-            log.error("FAIL  %s user=%s ip=%s -> AI HTTP %s %.1fs | %s", name, u["email"], ip, r.status_code, time.time() - t0, r.text[:300])
-            code, msg = _ai_error(name, r.status_code)
-            http = r.status_code if r.status_code in AI_ERR_MAP else 502
-            return err(code, msg, http)
-
-        log.info("DONE  %s user=%s ip=%s %.1fs", name, u["email"], ip, time.time() - t0)
-        return Response(content=r.content,
-                        media_type=r.headers.get("content-type", "image/png"))
+        # Keep compatibility with existing frontend code that expects image bytes.
+        await j.task
+        if j.status == "done":
+            return Response(content=j.result, media_type=j.media)
+        if j.status == "error":
+            code, message = _ai_error(name, 503) if j.err_code == "AI_DOWN" else (j.err_code or "INTERNAL_ERROR", j.err_msg or "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่")
+            http = 502 if j.err_code == "AI_DOWN" else 504 if j.err_code == "AI_TIMEOUT" else 502
+            return err(code, message, http)
+        return err("JOB_CANCELLED", "งานถูกยกเลิก", 409)
     return forward
 
 AI_CONCURRENCY = int(os.getenv("AI_CONCURRENCY", "1"))   # ต้องเท่ากับ MAX_CONCURRENT_JOBS ของ mainAI
@@ -556,11 +557,18 @@ def _get_job(job_id: str, u: dict) -> Job:
         raise HTTPException(404)
     return j
 
-async def _run_job(j: Job, ai_path: str, body: bytes, ctype: str):
+async def _run_job(
+    j: Job,
+    ai_path: str,
+    body: bytes,
+    ctype: str,
+    ip: str = "-",
+):
     t0 = time.time()
     try:
         async with _slots:
             j.status = "running"
+            log.info("JOB START %s user=%s ip=%s", j.name, j.owner, ip)
             await _notify()
             r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
         if r.status_code != 200:
@@ -576,8 +584,10 @@ async def _run_job(j: Job, ai_path: str, body: bytes, ctype: str):
         j.status = "cancelled"
         raise
     except httpx.TimeoutException:
+        log.error("JOB FAIL %s user=%s -> AI timeout %.1fs", j.name, j.owner, time.time() - t0)
         j.status, j.err_code, j.err_msg = "error", "AI_TIMEOUT", "AI ประมวลผลนานเกินไป"
-    except httpx.TransportError:
+    except httpx.TransportError as exc:
+        log.error("JOB FAIL %s user=%s -> AI down %.1fs %r", j.name, j.owner, time.time() - t0, exc)
         j.status, j.err_code, j.err_msg = "error", "AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้"
     except Exception:
         log.exception("JOB CRASH %s user=%s", j.name, j.owner)
@@ -603,11 +613,12 @@ async def create_job(name: str, request: Request, u: dict = Depends(me_user)):
         return p
     body, ctype, opts = p
 
+    ip = request.client.host if request.client else "-"
     j = Job(u["email"], name)
     JOBS[j.id] = j
     QUEUE.append(j.id)
-    j.task = asyncio.create_task(_run_job(j, AI_ROUTES[name], body, ctype))
-    log.info("JOB NEW %s user=%s opts=%s queue=%d", name, u["email"], opts, len(QUEUE))
+    j.task = asyncio.create_task(_run_job(j, AI_ROUTES[name], body, ctype, ip))
+    log.info("JOB NEW %s user=%s ip=%s opts=%s queue=%d", name, u["email"], ip, opts, len(QUEUE))
     return _snapshot(j)
 
 
