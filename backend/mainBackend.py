@@ -440,6 +440,14 @@ AI_ERR_MAP = {
 }
 AI_ERR_DEFAULT = ("INTERNAL_ERROR", "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่")
 
+# บาง endpoint ไม่ได้รับไฟล์ภาพ (เช่น generate รับแค่ prompt)
+# ถ้าใช้ AI_ERR_MAP ตรง ๆ ผู้ใช้จะเห็น "อ่านไฟล์รูปไม่สำเร็จ" ทั้งที่ไม่ได้อัปไฟล์เลย
+AI_ERR_OVERRIDE = {
+    "generate": {
+        422: ("INVALID_PROMPT", "ข้อมูล Prompt ไม่ถูกต้อง"),
+    },
+}
+
 def _make_ai_forwarder(name: str, ai_path: str):
     needs_file, max_mb = AI_RULES[name]
     async def forward(request: Request, u: dict = Depends(me_user)):
@@ -499,7 +507,8 @@ def _make_ai_forwarder(name: str, ai_path: str):
             # รายละเอียดจริงเก็บใน log เท่านั้น ไม่ส่งให้ผู้ใช้
             #log.error("AI %s -> HTTP %s: %s", ai_path, r.status_code, r.text[:500])
             log.error("FAIL  %s user=%s ip=%s opts=%s -> AI HTTP %s %.1fs | %s",name, u["email"], ip, opts, r.status_code, time.time() - t0, r.text[:300])
-            code, msg = AI_ERR_MAP.get(r.status_code, AI_ERR_DEFAULT)
+            code, msg = (AI_ERR_OVERRIDE.get(name, {}).get(r.status_code)
+                         or AI_ERR_MAP.get(r.status_code, AI_ERR_DEFAULT))
             http = r.status_code if r.status_code in AI_ERR_MAP else 502
             return err(code, msg, http)
 
