@@ -441,6 +441,19 @@ AI_ERR_MAP = {
 }
 AI_ERR_DEFAULT = ("INTERNAL_ERROR", "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่")
 
+# บาง endpoint ไม่ได้รับไฟล์ภาพ (เช่น generate รับแค่ prompt)
+# ถ้าใช้ AI_ERR_MAP ตรง ๆ ผู้ใช้จะเห็น "อ่านไฟล์รูปไม่สำเร็จ" ทั้งที่ไม่ได้อัปไฟล์เลย
+AI_ERR_OVERRIDE = {
+    "generate": {
+        422: ("INVALID_PROMPT", "ข้อมูล Prompt ไม่ถูกต้อง"),
+    },
+}
+
+def _ai_error(name: str, status: int):
+    """แปลง HTTP status จาก AI -> (code, ข้อความ) ตาม endpoint"""
+    return (AI_ERR_OVERRIDE.get(name, {}).get(status)
+            or AI_ERR_MAP.get(status, AI_ERR_DEFAULT))
+
 async def _prepare(request: Request, name: str):
     """คืน (body, ctype, opts) หรือ JSONResponse ถ้าผิดพลาด"""
     needs_file, max_mb = AI_RULES[name]
@@ -474,6 +487,30 @@ def _make_ai_forwarder(name: str, ai_path: str):
     async def forward(request: Request, u: dict = Depends(me_user)):
         p = await _prepare(request, name)
         if isinstance(p, JSONResponse): return p
+        body, ctype, opts = p
+
+        ip = request.client.host if request.client else "-"
+        log.info("START %s user=%s ip=%s size=%.2fMB opts=%s", name, u["email"], ip, len(body) / 1048576, opts)
+        t0 = time.time()
+        try:
+            r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
+        except httpx.TimeoutException as exc:
+            log.error("FAIL  %s user=%s ip=%s -> AI timeout %.1fs %r", name, u["email"], ip, time.time() - t0, exc)
+            return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
+        except httpx.TransportError as exc:
+            log.error("FAIL  %s user=%s ip=%s -> AI down %.1fs %r", name, u["email"], ip, time.time() - t0, exc)
+            return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
+
+        if r.status_code != 200:
+            # รายละเอียดจริงเก็บใน log เท่านั้น ไม่ส่งให้ผู้ใช้
+            log.error("FAIL  %s user=%s ip=%s -> AI HTTP %s %.1fs | %s", name, u["email"], ip, r.status_code, time.time() - t0, r.text[:300])
+            code, msg = _ai_error(name, r.status_code)
+            http = r.status_code if r.status_code in AI_ERR_MAP else 502
+            return err(code, msg, http)
+
+        log.info("DONE  %s user=%s ip=%s %.1fs", name, u["email"], ip, time.time() - t0)
+        return Response(content=r.content,
+                        media_type=r.headers.get("content-type", "image/png"))
     return forward
 
 AI_CONCURRENCY = int(os.getenv("AI_CONCURRENCY", "1"))   # ต้องเท่ากับ MAX_CONCURRENT_JOBS ของ mainAI
@@ -528,7 +565,7 @@ async def _run_job(j: Job, ai_path: str, body: bytes, ctype: str):
             r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
         if r.status_code != 200:
             log.error("JOB FAIL %s user=%s -> AI HTTP %s | %s", j.name, j.owner, r.status_code, r.text[:300])
-            j.err_code, j.err_msg = AI_ERR_MAP.get(r.status_code, AI_ERR_DEFAULT)
+            j.err_code, j.err_msg = _ai_error(j.name, r.status_code)
             j.status = "error"
         else:
             j.result = r.content
@@ -542,6 +579,9 @@ async def _run_job(j: Job, ai_path: str, body: bytes, ctype: str):
         j.status, j.err_code, j.err_msg = "error", "AI_TIMEOUT", "AI ประมวลผลนานเกินไป"
     except httpx.TransportError:
         j.status, j.err_code, j.err_msg = "error", "AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้"
+    except Exception:
+        log.exception("JOB CRASH %s user=%s", j.name, j.owner)
+        j.status, j.err_code, j.err_msg = "error", *AI_ERR_DEFAULT
     finally:
         j.finished = time.time()
         if j.id in QUEUE:
