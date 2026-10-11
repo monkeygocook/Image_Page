@@ -532,6 +532,46 @@ const Api = (() => {
             }
             return URL.createObjectURL(blob);
         },
+
+        // api.js — ใน image = { ... }
+        async processJob({ cfg, file, prompt, negative, options = {}, signal, onStatus }) {
+            // สร้าง body/headers เหมือน process() เดิม แล้วยิงไป /api/v1/jobs/<name>
+            const name = cfg.endpoint.split("/").pop();
+            const job = await request(`/api/v1/jobs/${name}`, { method: "POST", body, headers, signal, retry: 0 });
+            onStatus?.(job);
+
+            const onAbort = () => fetch(API_BASE + `/api/v1/jobs/${job.job_id}`,
+                { method: "DELETE", headers: { Authorization: `Bearer ${Token.get()}` } }).catch(() => { });
+            signal?.addEventListener("abort", onAbort, { once: true });
+
+            const res = await fetch(API_BASE + `/api/v1/jobs/${job.job_id}/events`, {
+                headers: { Authorization: `Bearer ${Token.get()}` }, signal,
+            });
+            if (!res.ok) throw new ApiError("INTERNAL_ERROR", `HTTP ${res.status}`, { status: res.status });
+
+            const reader = res.body.getReader(), dec = new TextDecoder();
+            let buf = "", final = null;
+            while (!final) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += dec.decode(value, { stream: true });
+                let i;
+                while ((i = buf.indexOf("\n\n")) >= 0) {
+                    const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+                    const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+                    if (!line) continue;                       // heartbeat
+                    const s = JSON.parse(line.slice(6));
+                    onStatus?.(s);
+                    if (["done", "error", "cancelled"].includes(s.status)) final = s;
+                }
+            }
+            signal?.removeEventListener("abort", onAbort);
+            if (!final || final.status === "cancelled") { const a = new Error("aborted"); a.name = "AbortError"; throw a; }
+            if (final.status === "error") throw new ApiError(final.error.code, final.error.message);
+
+            const blob = await request(`/api/v1/jobs/${job.job_id}/result`, { expect: "blob", retry: 0 });
+            return URL.createObjectURL(blob);
+        },
     };
 
     /* ---------- งานเจ้าหน้าที่ ---------- */
