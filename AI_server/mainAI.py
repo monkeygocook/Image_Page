@@ -1,9 +1,10 @@
 import asyncio
 import os
+from typing import Optional
 
 import patch
 from fastapi.concurrency import run_in_threadpool
-from services.generator import DEFAULT_SIZE, generate_image
+from services.generator import DEFAULT_SIZE, IMAGE_SIZES, generate_image
 from pydantic import BaseModel
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -83,19 +84,35 @@ async def remove_bg(
 
 class GenerateRequest(BaseModel):
     prompt: str
-    negative_prompt: str = ""
-    seed: int = -1
-    size: str = DEFAULT_SIZE
+    # รับ None ได้ด้วย กัน 422 เมื่อฝั่งหน้าเว็บส่ง null มา
+    negative_prompt: Optional[str] = ""
+    seed: Optional[int] = -1
+    size: Optional[str] = DEFAULT_SIZE
+
+MAX_PROMPT_LEN = 2000
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
+    prompt = (req.prompt or "").strip()
+    size = req.size or DEFAULT_SIZE
+    if not prompt or len(prompt) > MAX_PROMPT_LEN:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_PROMPT",
+                      "message": f"prompt must be 1-{MAX_PROMPT_LEN} characters"}
+        })
+    # ตรวจ size ตรงนี้ — ไม่พึ่ง except ValueError ครอบทั้งก้อน
+    # เพราะ JSONDecodeError / base64 error จาก Forge ก็เป็น ValueError ด้วย
+    if size not in IMAGE_SIZES:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_SIZE", "message": f"Unsupported size: {size}"}
+        })
     try:
         image = await run_queued(
             generate_image,
-            prompt=req.prompt,
-            negative_prompt=req.negative_prompt,
-            seed=req.seed,
-            size=req.size
+            prompt=prompt,
+            negative_prompt=(req.negative_prompt or "").strip(),
+            seed=req.seed if req.seed is not None else -1,
+            size=size,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={

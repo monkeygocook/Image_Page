@@ -86,6 +86,8 @@ function errMsg(err) {
     if (!err) return t("err.UNKNOWN");
     const key = "err." + (err.code || "UNKNOWN");
     let msg = I18N[lang][key] || err.message || t("err.UNKNOWN");
+    // error ที่ไม่มีรหัส (เช่น การเชื่อมต่อหลุด) -> โชว์สาเหตุจริงต่อท้าย จะได้ไล่ปัญหาได้
+    if ((!err.code || err.code === "UNKNOWN") && err.message) msg += ` (${err.message})`;
     if (err.code === "RATE_LIMITED" && err.retryAfter) msg += ` (${err.retryAfter}s)`;
     if (err.requestId) msg += t("hint.reqId", { id: err.requestId });
     return msg;
