@@ -24,7 +24,7 @@ const API_BASE = "";
 
 const REQUEST_TIMEOUT = 120000;     // เวลารอสูงสุดต่อ 1 request (2 นาที)
 /* งานประมวลผลภาพใช้เวลานานกว่า request ทั่วไปมาก ต้องแยก timeout */
-const PROCESS_TIMEOUT = 120000;   // 2 นาที
+const PROCESS_TIMEOUT = 330000;   // 5 นาที
 /* ============================================================
    การแสดงผลป้ายแจ้งเตือนโหมดจำลอง
    แก้ที่นี่ = ค่าตั้งต้น · แก้สดตอนรัน = ใช้ Console (ดูท้ายบล็อก)
@@ -147,6 +147,7 @@ const I18N = {
         "err.FORBIDDEN": "บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้",
         "err.NOT_FOUND": "ไม่พบข้อมูลที่ต้องการ",
         "err.VALIDATION_ERROR": "ข้อมูลที่ส่งไปไม่ถูกต้อง",
+        "err.INVALID_PROMPT": "กรุณากรอกคำอธิบายภาพ (ไม่เกิน 2000 ตัวอักษร)",
         "err.INVALID_FILE_TYPE": "ไฟล์ต้องเป็น PNG / JPG / WEBP เท่านั้น",
         "err.FILE_TOO_LARGE": "ไฟล์ใหญ่เกินกำหนด",
         "err.UNPROCESSABLE_IMAGE": "อ่านไฟล์รูปไม่สำเร็จ ลองไฟล์อื่นดูครับ",
@@ -154,8 +155,15 @@ const I18N = {
         "err.RATE_LIMITED": "ใช้งานถี่เกินไป กรุณารอสักครู่แล้วลองใหม่",
         "err.INTERNAL_ERROR": "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่",
         "err.MODEL_UNAVAILABLE": "โมเดลยังโหลดไม่เสร็จ กรุณารอสักครู่",
+        "err.AI_TIMEOUT": "AI ประมวลผลนานเกินไป ลองใหม่อีกครั้ง",
+        "err.AI_DOWN": "ระบบ AI ไม่พร้อมใช้งานชั่วคราว",
         "err.EMAIL_TAKEN": "อีเมลนี้ถูกใช้แล้ว",
         "err.INVALID_CREDENTIALS": "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+        "err.WEAK_PASSWORD": "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร",
+        "err.USER_NOT_FOUND": "ไม่พบผู้ใช้",
+        "err.INVALID_ROLE": "สิทธิ์ที่ระบุไม่ถูกต้อง",
+        "err.SELF_DEMOTE": "ไม่สามารถลดสิทธิ์ตัวเองได้",
+        "err.SELF_DELETE": "ไม่สามารถลบบัญชีตัวเองได้",
         "err.SELF_FORBIDDEN": "ไม่สามารถแก้สิทธิ์หรือลบบัญชีของตัวเองได้",
         "err.LAST_STAFF": "ต้องเหลือเจ้าหน้าที่อย่างน้อย 1 คนในระบบ",
         "err.UNKNOWN": "เกิดข้อผิดพลาดที่ไม่รู้จัก",
@@ -257,6 +265,7 @@ const I18N = {
         "err.FORBIDDEN": "Your account is not allowed to do that.",
         "err.NOT_FOUND": "The requested resource was not found.",
         "err.VALIDATION_ERROR": "The data sent was invalid.",
+        "err.INVALID_PROMPT": "Please enter an image description (max 2000 characters)",
         "err.INVALID_FILE_TYPE": "Only PNG / JPG / WEBP are allowed",
         "err.FILE_TOO_LARGE": "File exceeds the size limit",
         "err.UNPROCESSABLE_IMAGE": "Could not read that image. Try another file.",
@@ -264,8 +273,15 @@ const I18N = {
         "err.RATE_LIMITED": "Too many requests. Please wait a moment.",
         "err.INTERNAL_ERROR": "Server error. Please try again.",
         "err.MODEL_UNAVAILABLE": "The model is still loading. Please wait.",
+        "err.AI_TIMEOUT": "The AI took too long to respond. Please try again.",
+        "err.AI_DOWN": "The AI service is temporarily unavailable.",
         "err.EMAIL_TAKEN": "That email is already registered",
         "err.INVALID_CREDENTIALS": "Incorrect email or password",
+        "err.WEAK_PASSWORD": "Password must be at least 8 characters",
+        "err.USER_NOT_FOUND": "User not found",
+        "err.INVALID_ROLE": "Invalid role specified",
+        "err.SELF_DEMOTE": "You cannot change your own role",
+        "err.SELF_DELETE": "You cannot delete your own account",
         "err.SELF_FORBIDDEN": "You cannot change or delete your own account",
         "err.LAST_STAFF": "At least one staff account must remain",
         "err.UNKNOWN": "An unknown error occurred",
@@ -376,46 +392,71 @@ const TAB_CONFIG = {
         },
     },
     icon: {
-        label: "Icon", type: "img2img",
+        label: "Adjust", type: "img2img",
         usesPrompt: false, needsFile: true,
-        endpoint: "/api/v1/clean-image", contentType: "multipart/form-data",
-        cta: { th: "ลบลายน้ำ & นอยส์", en: "Clean Image" },
-        hint: { th: "ภาพที่มีลายน้ำหรือนอยส์ · ไม่เกิน 12 MB", en: "Watermarked or noisy image · max 12 MB" },
+        endpoint: "/api/v1/adjust", contentType: "multipart/form-data",
+        cta: { th: "ปรับภาพ", en: "Adjust" },
+        hint: {
+            th: "PNG / JPG / WEBP · ไม่เกิน 12 MB", en: "PNG / JPG / WEBP · max12 MB"
+        },
         accept: ["image/png", "image/jpeg", "image/webp"], maxMB: 12,
         returns: "image/png",
         fields: {
-            denoise: {
-                kind: "enum", label: { th: "ระดับลดนอยส์", en: "Denoise" }, default: "medium",
-                values: [
-                    { v: "low", th: "เบา", en: "Low" },
-                    { v: "medium", th: "กลาง", en: "Medium" },
-                    { v: "high", th: "แรง", en: "High" },
-                ],
+            brightness: {
+                kind: "range", label: {
+                    th: "ความสว่าง", en:
+                        "Brightness"
+                }, min: -100, max: 100, step: 5, default: 0
             },
-            remove_watermark: { kind: "bool", label: { th: "ลบลายน้ำ", en: "Remove watermark" }, default: true },
+            contrast: {
+                kind: "range", label: {
+                    th: "คอนทราสต์", en: "Contrast"
+                }, min: -100, max: 100, step: 5, default: 0
+            },
+            saturation: {
+                kind: "range", label: {
+                    th: "ความสดของสี", en:
+                        "Saturation"
+                }, min: -100, max: 100, step: 5, default: 0
+            },
+            temperature: {
+                kind: "range", label: {
+                    th: "อุณหภูมิสี", en:
+                        "Temperature"
+                }, min: -100, max: 100, step: 5, default: 0
+            },
+            vignette: {
+                kind: "range", label: { th: "ขอบมืด", en: "Vignette" },
+                min: -100, max: 100, step: 5, default: 0
+            },
         },
     },
     tone: {
         label: "Tone", type: "img2img",
         usesPrompt: false, needsFile: true,
-        endpoint: "/api/v1/color-grade", contentType: "multipart/form-data",
+        endpoint: "/api/v1/filter", contentType: "multipart/form-data",
         cta: { th: "ปรับโทนสี", en: "Color Grade" },
         hint: { th: "PNG / JPG / WEBP · ไม่เกิน 20 MB", en: "PNG / JPG / WEBP · max 20 MB" },
         accept: ["image/png", "image/jpeg", "image/webp"], maxMB: 20,
-        returns: "image/jpeg",
+        returns: "image/png",
         fields: {
-            tone: {
+            filter_name: {
                 kind: "enum", label: { th: "โทนสี", en: "Tone" }, default: "warm",
                 values: [
                     { v: "warm", th: "อบอุ่น", en: "Warm" },
                     { v: "cool", th: "เย็น", en: "Cool" },
-                    { v: "pastel", th: "พาสเทล", en: "Pastel" },
-                    { v: "mono", th: "ขาวดำ", en: "Mono" },
+                    { v: "sepia", th: "ซีเปีย", en: "sepia" },
+                    { v: "grayscale", th: "ขาวดำ", en: "grayscale" },
                     { v: "vivid", th: "สดจัด", en: "Vivid" },
                     { v: "cinematic", th: "ภาพยนตร์", en: "Cinematic" },
+                    { v: "vintage", th: "โบราณ", en: "Vintage" },
+                    { v: "sharpen", th: "คม", en: "Sharpen" },
+                    { v: "sketch", th: "สเก็ตช์", en: "Sketch" },
+                    { v: "cartoon", th: "การ์ตูน", en: "Cartoon" },
+
                 ],
             },
-            strength: { kind: "range", label: { th: "ความเข้ม", en: "Strength" }, min: 0, max: 100, step: 5, default: 70, suffix: "%" },
+            intensity: { kind: "range", label: { th: "ความเข้ม", en: "intensity" }, min: 0, max: 100, step: 5, default: 70, suffix: "%" },
         },
     },
     blur: {
@@ -434,9 +475,7 @@ const TAB_CONFIG = {
                     { v: "gaussian", th: "ทั้งภาพ", en: "Gaussian" },
                     { v: "background", th: "เฉพาะพื้นหลัง", en: "Background" },
                     { v: "face", th: "เฉพาะใบหน้า", en: "Face" },
-                    { v: "motion", th: "เคลื่อนไหว", en: "Motion" },
-                    { v: "pixelate", th: "โมเสก", en: "Pixelate" },
-                    { v: "radial", th: "รัศมี", en: "Radial" },
+                    /* { v: "pixelate", th: "โมเสก", en: "Pixelate" }, */
                 ],
             },
             blur_amount: {

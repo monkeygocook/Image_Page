@@ -3,7 +3,7 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 
-const PORT = 7860;
+const PORT = 5050;
 
 createServer((req, res) => {
     // CORS — หน้าบ้านรันคนละ port จึงต้องเปิดให้
@@ -26,4 +26,4 @@ createServer((req, res) => {
     res.end(JSON.stringify({
         error: { code: "NOT_FOUND", message: "ยังไม่ได้ทำ endpoint นี้" }
     }));
-}).listen(PORT, "0.0.0.0", () => console.log(`fake backend → http://127.0.0.1:${PORT}`));
+}).listen(PORT, "0.0.0.0", () => console.log(`fake backend → http://172.20.56.154:${PORT}`));
