@@ -9,16 +9,32 @@ from requests.exceptions import RequestException
 
 FORGE_URL = os.getenv("FORGE_URL", "http://127.0.0.1:7860").rstrip("/")
 
+# ขนาดที่อนุญาต (SD 1.5) — key ต้องตรงกับค่าใน config.js
+IMAGE_SIZES = {
+    "512x512": (512, 512),
+    "512x768": (512, 768),
+    "768x512": (768, 512),
+    "768x768": (768, 768),
+}
+DEFAULT_SIZE = "512x768"
+
 
 def generate_image(
     prompt: str,
     negative_prompt: str = "",
-    seed: int = -1
+    seed: int = -1,
+    size: str = DEFAULT_SIZE
 ):
+    if size not in IMAGE_SIZES:
+        raise ValueError(f"Unsupported size: {size}")
+    width, height = IMAGE_SIZES[size]
+
     payload = {
         "prompt": prompt,
         "negative_prompt": negative_prompt,
-        "seed": seed
+        "seed": seed,
+        "width": width,
+        "height": height
     }
 
     try:
