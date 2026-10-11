@@ -27,12 +27,14 @@ def health():
 
 @app.post("/remove-background")
 async def remove_bg(
-    image: UploadFile = File(...)
+    image: UploadFile = File(...),
+    output: str = Form("transparent"),
+    refine_edge: bool = Form(True)
 ):
     image_bytes = await image.read()
 
     try:
-        result = remove_background(image_bytes)
+        result = remove_background(image_bytes, output, refine_edge)
     except Exception as exc:
         raise HTTPException(status_code=422, detail={
             "error": {"code": "INVALID_IMAGE", "message": str(exc)}

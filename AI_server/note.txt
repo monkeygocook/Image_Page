@@ -13,7 +13,7 @@ Backend ต้องตรวจสอบสิทธิ์, จำกัดข�
 0. ข้อมูลทั่วไป
 ------------------------------------------------------------
 - Base URL (dev)  : http://127.0.0.1:8000        (ต่างจาก backend/API_SPEC.md ที่ใช้พอร์ต 7860)
-- วิธีรัน         : python -m uvicorn main:app --reload     (ใช้ Python 3.12)
+- วิธีรัน         : python -m uvicorn mainAI:app --reload     (ใช้ Python 3.12)
 - ไม่มี prefix /api/v1 และไม่มี Authorization header
 - ลองยิงด้วยมือได้ที่  http://127.0.0.1:8000/docs  (หน้า Swagger)
 
