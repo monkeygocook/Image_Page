@@ -140,6 +140,14 @@ const I18N = {
         "hint.error": "ผิดพลาด: {msg}",
         "hint.reqId": " (รหัสอ้างอิง: {id})",
 
+        /* ---------- คิว ---------- */
+        "err.QUEUE_FULL": "คิวเต็ม กรุณาลองใหม่ภายหลัง",
+        "err.JOB_ACTIVE": "คุณมีงานที่กำลังทำอยู่แล้ว",
+        "err.NOT_READY": "งานยังไม่เสร็จ",
+        "job.queued": "อยู่ในคิวลำดับที่ {n}",
+        "job.running": "กำลังประมวลผล...",
+
+
         /* ---------- ข้อความผิดพลาดจาก API ---------- */
         "err.NETWORK": "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่าหลังบ้านเปิดอยู่หรือไม่",
         "err.TIMEOUT": "เซิร์ฟเวอร์ใช้เวลานานเกินไป ลองใหม่อีกครั้ง",
@@ -258,6 +266,13 @@ const I18N = {
         "hint.abort": "Cancelled",
         "hint.error": "Error: {msg}",
         "hint.reqId": " (request id: {id})",
+
+        /* ---------- คิว ---------- */
+                "err.QUEUE_FULL": "Queue is full. Please try again later.",
+        "err.JOB_ACTIVE": "You already have a job in progress.",
+        "err.NOT_READY": "The job is not ready yet.",
+        "job.queued": "You are #{n} in the queue",
+        "job.running": "Processing...",
 
         "err.NETWORK": "Cannot reach the server. Is the backend running?",
         "err.TIMEOUT": "The server took too long. Please try again.",

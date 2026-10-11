@@ -467,7 +467,7 @@ $("genForm").addEventListener("submit", async (e) => {
     clearResult();
     setBusy(true);
     try {
-        const url = await Api.image.process({
+        const url = await Api.image.processJob({          // 1) เปลี่ยนชื่อ process -> processJob
             tab: currentTab,
             cfg,
             file: currentFile,
@@ -476,6 +476,14 @@ $("genForm").addEventListener("submit", async (e) => {
             options: optionState,
             previewUrl: previewURL(),
             signal: inflight.signal,
+            onStatus: (s) => {                            // 2) เพิ่มบรรทัดนี้ทั้งก้อน
+                showHint(
+                    s.status === "queued"
+                        ? t("job.queued", { n: s.position })
+                        : t("job.running"),
+                    true
+                );
+            },
         });
         showResult(url, cfg.needsFile ? previewURL() : null);
         showHint(Api.isMock() ? t("hint.mock") : "", true);

@@ -4,6 +4,7 @@ from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from PIL import Image, ImageDraw
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.datastructures import UploadFile as StarletteUpload
 from contextvars import ContextVar
@@ -440,74 +441,193 @@ AI_ERR_MAP = {
 }
 AI_ERR_DEFAULT = ("INTERNAL_ERROR", "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่")
 
+async def _prepare(request: Request, name: str):
+    """คืน (body, ctype, opts) หรือ JSONResponse ถ้าผิดพลาด"""
+    needs_file, max_mb = AI_RULES[name]
+    ctype = request.headers.get("content-type", "")
+
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > AI_MAX_BODY:
+        return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
+    body = await request.body()
+    if len(body) > AI_MAX_BODY:
+        return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
+
+    opts = {}
+    if needs_file:
+        if not ctype.startswith("multipart/form-data"):
+            return err("VALIDATION_ERROR", "ต้องส่งเป็น multipart/form-data", 415)
+        form = await request.form()
+        f = form.get("image")
+        opts = {k: v for k, v in form.items() if isinstance(v, str)}
+        if not isinstance(f, StarletteUpload):
+            return err("VALIDATION_ERROR", "ไม่พบไฟล์ภาพในฟิลด์ image", 422)
+        if f.content_type not in ACCEPT:
+            return err("INVALID_FILE_TYPE", f"ไม่รองรับชนิดไฟล์: {f.content_type}", 415)
+        f.file.seek(0, 2)
+        if f.file.tell() > max_mb * 1024 * 1024:
+            return err("FILE_TOO_LARGE", f"ไฟล์เกิน {max_mb} MB", 413)
+    return body, (ctype or "application/octet-stream"), opts
+
 def _make_ai_forwarder(name: str, ai_path: str):
     needs_file, max_mb = AI_RULES[name]
     async def forward(request: Request, u: dict = Depends(me_user)):
-        ctype = request.headers.get("content-type", "")
-
-        opts = {}
-
-        # กันก่อนอ่าน body: ดู Content-Length ก่อน จะได้ไม่โหลดไฟล์ยักษ์เข้าแรม
-        cl = request.headers.get("content-length")
-        if cl and cl.isdigit() and int(cl) > AI_MAX_BODY:
-            return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
-
-        body = await request.body()
-        if len(body) > AI_MAX_BODY:
-            return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
-
-        if needs_file:
-            if not ctype.startswith("multipart/form-data"):
-                return err("VALIDATION_ERROR", "ต้องส่งเป็น multipart/form-data", 415)
-            form = await request.form()          # แกะจาก body ที่แคชไว้แล้ว
-            f = form.get("image")
-
-            opts = {k: v for k, v in form.items() if isinstance(v, str)}
-
-            if not isinstance(f, StarletteUpload):
-                return err("VALIDATION_ERROR", "ไม่พบไฟล์ภาพในฟิลด์ image", 422)
-            if f.content_type not in ACCEPT:
-                return err("INVALID_FILE_TYPE", f"ไม่รองรับชนิดไฟล์: {f.content_type}", 415)
-            f.file.seek(0, 2)
-            size = f.file.tell()
-            if size > max_mb * 1024 * 1024:
-                return err("FILE_TOO_LARGE", f"ไฟล์เกิน {max_mb} MB", 413)
-        # ... ส่งต่อเหมือนเดิม
-        body = await request.body()
-        if len(body) > AI_MAX_BODY:
-            return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
-
-        # ส่ง Content-Type เดิมต่อ (multipart boundary / json) ไม่ต้องแปลงอะไร
-        headers = {"content-type": request.headers.get("content-type", "application/octet-stream")}
-
-        ip = request.client.host if request.client else "-"
-        log.info("START %s user=%s ip=%s size=%.2fMB opts=%s", name, u["email"], ip, len(body) / 1048576, opts)
-        t0 = time.time()
-
-        try:
-            r = await _ai_client.post(ai_path, content=body, headers=headers)
-        except httpx.TimeoutException as exc:
-            #log.error("AI timeout %s: %r", ai_path, exc)
-            log.error("FAIL  %s user=%s ip=%s opts=%s -> AI timeout %.1fs %r",name, u["email"], ip, opts, time.time() - t0, exc)
-            return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
-        except httpx.TransportError as exc:
-            #log.error("AI down %s: %r", ai_path, exc)
-            log.error("FAIL  %s user=%s ip=%s opts=%s -> AI down %.1fs %r",name, u["email"], ip, opts, time.time() - t0, exc)
-            return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
-
-        if r.status_code != 200:
-            # รายละเอียดจริงเก็บใน log เท่านั้น ไม่ส่งให้ผู้ใช้
-            #log.error("AI %s -> HTTP %s: %s", ai_path, r.status_code, r.text[:500])
-            log.error("FAIL  %s user=%s ip=%s opts=%s -> AI HTTP %s %.1fs | %s",name, u["email"], ip, opts, r.status_code, time.time() - t0, r.text[:300])
-            code, msg = AI_ERR_MAP.get(r.status_code, AI_ERR_DEFAULT)
-            http = r.status_code if r.status_code in AI_ERR_MAP else 502
-            return err(code, msg, http)
-
-        log.info("DONE  %s user=%s ip=%s size=%.2fMB %.1fs", name, u["email"], ip, len(body) / 1048576, time.time() - t0)
-
-        return Response(content=r.content,
-                        media_type=r.headers.get("content-type", "image/png"))
+        p = await _prepare(request, name)
+        if isinstance(p, JSONResponse): return p
     return forward
+
+AI_CONCURRENCY = int(os.getenv("AI_CONCURRENCY", "1"))   # ต้องเท่ากับ MAX_CONCURRENT_JOBS ของ mainAI
+MAX_WAITING    = int(os.getenv("MAX_WAITING", "10"))
+JOB_TTL        = 600                                      # เก็บผลไว้ 10 นาที
+
+class Job:
+    def __init__(self, owner: str, name: str):
+        self.id = uuid.uuid4().hex
+        self.owner, self.name = owner, name
+        self.status: str = "queued"      # queued | running | done | error | cancelled
+        self.result: bytes = b""
+        self.media: str = "image/png"
+        self.err_code: str | None = None
+        self.err_msg: str | None = None
+        self.finished: float | None = None
+        self.task: asyncio.Task | None = None
+
+JOBS: dict[str, Job] = {}
+QUEUE: list[str] = []                    # งานที่ยังไม่จบ เรียงตามลำดับเข้า
+_slots = asyncio.Semaphore(AI_CONCURRENCY)
+_cond = asyncio.Condition()
+
+async def _notify():
+    async with _cond:
+        _cond.notify_all()
+
+def _snapshot(j: Job) -> dict:
+    s: dict = {"job_id": j.id, "status": j.status}
+    #s = {"job_id": j.id, "status": j.status}
+    if j.status == "queued" and j.id in QUEUE:
+        ahead = QUEUE.index(j.id)                 # รวมงานที่กำลังรันอยู่
+        s["position"] = ahead - AI_CONCURRENCY + 1  # 1 = คิวถัดไป
+        s["ahead"] = ahead
+        s["total"] = len(QUEUE)
+    if j.status == "error":
+        s["error"] = {"code": j.err_code, "message": j.err_msg}
+    return s
+
+def _get_job(job_id: str, u: dict) -> Job:
+    j = JOBS.get(job_id)
+    if not j or j.owner != u["email"]:          # ห้ามดูงานของคนอื่น
+        raise HTTPException(404)
+    return j
+
+async def _run_job(j: Job, ai_path: str, body: bytes, ctype: str):
+    t0 = time.time()
+    try:
+        async with _slots:
+            j.status = "running"
+            await _notify()
+            r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
+        if r.status_code != 200:
+            log.error("JOB FAIL %s user=%s -> AI HTTP %s | %s", j.name, j.owner, r.status_code, r.text[:300])
+            j.err_code, j.err_msg = AI_ERR_MAP.get(r.status_code, AI_ERR_DEFAULT)
+            j.status = "error"
+        else:
+            j.result = r.content
+            j.media = r.headers.get("content-type", "image/png")
+            j.status = "done"
+            log.info("JOB DONE %s user=%s %.1fs", j.name, j.owner, time.time() - t0)
+    except asyncio.CancelledError:
+        j.status = "cancelled"
+        raise
+    except httpx.TimeoutException:
+        j.status, j.err_code, j.err_msg = "error", "AI_TIMEOUT", "AI ประมวลผลนานเกินไป"
+    except httpx.TransportError:
+        j.status, j.err_code, j.err_msg = "error", "AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้"
+    finally:
+        j.finished = time.time()
+        if j.id in QUEUE:
+            QUEUE.remove(j.id)
+        await _notify()
+
+
+@app.post("/api/v1/jobs/{name}", status_code=202)
+async def create_job(name: str, request: Request, u: dict = Depends(me_user)):
+    if name not in AI_ROUTES:
+        return err("NOT_FOUND", "ไม่พบข้อมูลที่ต้องการ", 404)
+    if any(JOBS[i].owner == u["email"] for i in QUEUE):          # 1 คน 1 งานต่อครั้ง
+        return err("JOB_ACTIVE", "คุณมีงานที่กำลังทำอยู่แล้ว", 409)
+    if len(QUEUE) >= AI_CONCURRENCY + MAX_WAITING:
+        return err("QUEUE_FULL", "คิวเต็ม กรุณาลองใหม่ภายหลัง", 503)
+
+    p = await _prepare(request, name)
+    if isinstance(p, JSONResponse):
+        return p
+    body, ctype, opts = p
+
+    j = Job(u["email"], name)
+    JOBS[j.id] = j
+    QUEUE.append(j.id)
+    j.task = asyncio.create_task(_run_job(j, AI_ROUTES[name], body, ctype))
+    log.info("JOB NEW %s user=%s opts=%s queue=%d", name, u["email"], opts, len(QUEUE))
+    return _snapshot(j)
+
+
+@app.get("/api/v1/jobs/{job_id}")                 # สำหรับ polling สำรอง
+async def job_status(job_id: str, u: dict = Depends(me_user)):
+    return _snapshot(_get_job(job_id, u))
+
+
+@app.get("/api/v1/jobs/{job_id}/events")
+async def job_events(job_id: str, request: Request, u: dict = Depends(me_user)):
+    j = _get_job(job_id, u)
+
+    async def gen():
+        last = None
+        while True:
+            snap = _snapshot(j)
+            if snap != last:
+                yield f"event: status\ndata: {json.dumps(snap)}\n\n"
+                last = snap
+            if j.status in ("done", "error", "cancelled"):
+                return
+            try:
+                async with _cond:
+                    # เช็คซ้ำใน lock กันพลาด event ที่เกิดระหว่างรอ
+                    if _snapshot(j) == last:
+                        await asyncio.wait_for(_cond.wait(), 15)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"                # heartbeat กัน proxy ตัดการเชื่อมต่อ
+            if await request.is_disconnected():
+                return
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/v1/jobs/{job_id}/result")
+async def job_result(job_id: str, u: dict = Depends(me_user)):
+    j = _get_job(job_id, u)
+    if j.status != "done":
+        return err("NOT_READY", "งานยังไม่เสร็จ", 409)
+    return Response(content=j.result, media_type=j.media)
+
+
+@app.delete("/api/v1/jobs/{job_id}", status_code=204)
+async def job_cancel(job_id: str, u: dict = Depends(me_user)):
+    j = _get_job(job_id, u)
+    if j.task and not j.task.done():
+        j.task.cancel()
+    return Response(status_code=204)
+
+
+@app.on_event("startup")
+async def _job_gc():
+    async def loop():
+        while True:
+            await asyncio.sleep(60)
+            now = time.time()
+            for k in [k for k, j in JOBS.items() if j.finished and now - j.finished > JOB_TTL]:
+                JOBS.pop(k, None)
+    asyncio.create_task(loop())
 
 for _name, _ai_path in AI_ROUTES.items():
     app.add_api_route(f"/api/v1/{_name}", _make_ai_forwarder(_name, _ai_path), methods=["POST"])
