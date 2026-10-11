@@ -140,6 +140,14 @@ const I18N = {
         "hint.error": "ผิดพลาด: {msg}",
         "hint.reqId": " (รหัสอ้างอิง: {id})",
 
+        /* ---------- คิว ---------- */
+        "err.QUEUE_FULL": "คิวเต็ม กรุณาลองใหม่ภายหลัง",
+        "err.JOB_ACTIVE": "คุณมีงานที่กำลังทำอยู่แล้ว",
+        "err.NOT_READY": "งานยังไม่เสร็จ",
+        "job.queued": "อยู่ในคิวลำดับที่ {n}",
+        "job.running": "กำลังประมวลผล...",
+
+
         /* ---------- ข้อความผิดพลาดจาก API ---------- */
         "err.NETWORK": "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่าหลังบ้านเปิดอยู่หรือไม่",
         "err.TIMEOUT": "เซิร์ฟเวอร์ใช้เวลานานเกินไป ลองใหม่อีกครั้ง",
@@ -259,6 +267,13 @@ const I18N = {
         "hint.error": "Error: {msg}",
         "hint.reqId": " (request id: {id})",
 
+        /* ---------- คิว ---------- */
+                "err.QUEUE_FULL": "Queue is full. Please try again later.",
+        "err.JOB_ACTIVE": "You already have a job in progress.",
+        "err.NOT_READY": "The job is not ready yet.",
+        "job.queued": "You are #{n} in the queue",
+        "job.running": "Processing...",
+
         "err.NETWORK": "Cannot reach the server. Is the backend running?",
         "err.TIMEOUT": "The server took too long. Please try again.",
         "err.UNAUTHORIZED": "Your session expired. Please sign in again.",
@@ -358,7 +373,17 @@ const TAB_CONFIG = {
         cta: { th: "สร้างภาพ", en: "Generate" },
         hint: { th: "อธิบายภาพที่ต้องการให้ละเอียด", en: "Describe your image in detail" },
         returns: "image/png",
-        fields: {},
+        fields: {
+            size: {
+                kind: "enum", label: { th: "ขนาดภาพ", en: "Image size" }, default: "512x768",
+                values: [
+                    { v: "512x512", th: "จัตุรัส 512×512", en: "Square 512×512" },
+                    { v: "512x768", th: "แนวตั้ง 512×768", en: "Portrait 512×768" },
+                    { v: "768x512", th: "แนวนอน 768×512", en: "Landscape 768×512" },
+                    { v: "768x768", th: "จัตุรัสใหญ่ 768×768", en: "Large square 768×768" },
+                ],
+            },
+        },
     },
 
     back: {
