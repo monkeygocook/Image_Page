@@ -342,7 +342,17 @@ const TAB_CONFIG = {
         cta: { th: "สร้างภาพ", en: "Generate" },
         hint: { th: "อธิบายภาพที่ต้องการให้ละเอียด", en: "Describe your image in detail" },
         returns: "image/png",
-        fields: {},
+        fields: {
+            size: {
+                kind: "enum", label: { th: "ขนาดภาพ", en: "Image size" }, default: "512x768",
+                values: [
+                    { v: "512x512", th: "จัตุรัส 512×512", en: "Square 512×512" },
+                    { v: "512x768", th: "แนวตั้ง 512×768", en: "Portrait 512×768" },
+                    { v: "768x512", th: "แนวนอน 768×512", en: "Landscape 768×512" },
+                    { v: "768x768", th: "จัตุรัสใหญ่ 768×768", en: "Large square 768×768" },
+                ],
+            },
+        },
     },
 
     back: {

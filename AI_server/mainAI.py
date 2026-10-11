@@ -1,5 +1,5 @@
 import patch
-from services.generator import generate_image
+from services.generator import DEFAULT_SIZE, generate_image
 from pydantic import BaseModel
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -50,6 +50,7 @@ class GenerateRequest(BaseModel):
     prompt: str
     negative_prompt: str = ""
     seed: int = -1
+    size: str = DEFAULT_SIZE
 
 @app.post("/generate")
 def generate(req: GenerateRequest):
@@ -57,8 +58,13 @@ def generate(req: GenerateRequest):
         image = generate_image(
             prompt=req.prompt,
             negative_prompt=req.negative_prompt,
-            seed=req.seed
+            seed=req.seed,
+            size=req.size
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_SIZE", "message": str(exc)}
+        }) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
