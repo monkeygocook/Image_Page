@@ -494,6 +494,20 @@ const Api = (() => {
     };
 
     /* ---------- ประมวลผลภาพ ---------- */
+    function buildBody({ cfg, file, prompt, negative, options = {} }) {
+    if (cfg.contentType === "application/json") {
+        const p = (prompt || "").trim();
+        if (cfg.usesPrompt && !p) throw new ApiError("VALIDATION_ERROR", "กรุณากรอกคำอธิบายภาพ");
+        const payload = { prompt: p, ...options };
+        if (negative && negative.trim()) payload.negative_prompt = negative.trim();
+        return { body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } };
+    }
+    if (!file) throw new ApiError("VALIDATION_ERROR", "กรุณาเลือกไฟล์ภาพก่อน");
+    const fd = new FormData();
+    fd.append("image", file, file.name);
+    for (const [k, v] of Object.entries(options)) fd.append(k, String(v));
+    return { body: fd, headers: {} };   // ห้ามตั้ง Content-Type เอง
+    }
     const image = {
         /**
          * @returns {Promise<string>} URL ของภาพผลลัพธ์ (blob: หรือ http:)
@@ -536,6 +550,7 @@ const Api = (() => {
         // api.js — ใน image = { ... }
         async processJob({ cfg, file, prompt, negative, options = {}, signal, onStatus }) {
             // สร้าง body/headers เหมือน process() เดิม แล้วยิงไป /api/v1/jobs/<name>
+            const { body, headers } = buildBody({ cfg, file, prompt, negative, options });
             const name = cfg.endpoint.split("/").pop();
             const job = await request(`/api/v1/jobs/${name}`, { method: "POST", body, headers, signal, retry: 0 });
             onStatus?.(job);
