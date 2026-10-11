@@ -13,6 +13,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 from rembg import remove
 
+from services.background import get_session
+
 MAX_BLUR_RADIUS = 25.0          # PIL GaussianBlur radius at blur_amount=100
 FACE_DETECT_MAX_DIM = 640       # downscale cap for face detection (perf, not output quality)
 FACE_MASK_FEATHER = 15          # px radius used to soften mask edges around faces
@@ -75,7 +77,7 @@ def gaussian_blur(image_bytes: bytes, blur_amount: int = 40) -> bytes:
 
 def _foreground_mask(image: Image.Image) -> Image.Image:
     """Run background removal and return its alpha channel as the sharp-subject mask."""
-    cutout_bytes = remove(_encode_png(image))
+    cutout_bytes = remove(_encode_png(image), session=get_session())
     cutout = Image.open(io.BytesIO(cutout_bytes)).convert("RGBA")
     return cutout.getchannel("A")
 

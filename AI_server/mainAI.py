@@ -1,4 +1,8 @@
+import asyncio
+import os
+
 import patch
+from fastapi.concurrency import run_in_threadpool
 from services.generator import DEFAULT_SIZE, generate_image
 from pydantic import BaseModel
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -10,6 +14,35 @@ from services.Filter import FILTERS, apply_filter
 from services.adjust import adjust_image
 
 app = FastAPI()
+
+# Only MAX_CONCURRENT_JOBS heavy jobs run at once; others wait in the queue.
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "1"))
+MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", "10"))
+_job_slots = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+_pending_jobs = 0
+
+
+async def run_queued(func, *args, **kwargs):
+    global _pending_jobs
+    if _pending_jobs >= MAX_QUEUE_SIZE + MAX_CONCURRENT_JOBS:
+        raise HTTPException(status_code=503, detail={
+            "error": {"code": "QUEUE_FULL", "message": "Server is busy, please try again later"}
+        })
+    _pending_jobs += 1
+    try:
+        async with _job_slots:
+            return await run_in_threadpool(func, *args, **kwargs)
+    finally:
+        _pending_jobs -= 1
+
+
+@app.get("/queue")
+def queue_status():
+    return {
+        "pending": _pending_jobs,
+        "max_concurrent": MAX_CONCURRENT_JOBS,
+        "max_queue": MAX_QUEUE_SIZE,
+    }
 
 BLUR_HANDLERS = {
     "gaussian": gaussian_blur,
@@ -34,7 +67,9 @@ async def remove_bg(
     image_bytes = await image.read()
 
     try:
-        result = remove_background(image_bytes, output, refine_edge)
+        result = await run_queued(remove_background, image_bytes, output, refine_edge)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail={
             "error": {"code": "INVALID_IMAGE", "message": str(exc)}
@@ -53,9 +88,10 @@ class GenerateRequest(BaseModel):
     size: str = DEFAULT_SIZE
 
 @app.post("/generate")
-def generate(req: GenerateRequest):
+async def generate(req: GenerateRequest):
     try:
-        image = generate_image(
+        image = await run_queued(
+            generate_image,
             prompt=req.prompt,
             negative_prompt=req.negative_prompt,
             seed=req.seed,
@@ -86,7 +122,8 @@ async def adjust_endpoint(
     image_bytes = await image.read()
 
     try:
-        result = adjust_image(
+        result = await run_queued(
+            adjust_image,
             image_bytes, brightness, contrast, saturation, temperature, vignette
         )
     except ValueError as exc:
@@ -119,7 +156,7 @@ async def filter_image(
     image_bytes = await image.read()
 
     try:
-        result = apply_filter(image_bytes, filter_name, intensity)
+        result = await run_queued(apply_filter, image_bytes, filter_name, intensity)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
             "error": {"code": "INVALID_IMAGE", "message": str(exc)}
@@ -151,7 +188,7 @@ async def blur(
     image_bytes = await image.read()
 
     try:
-        result = handler(image_bytes, blur_amount)
+        result = await run_queued(handler, image_bytes, blur_amount)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
             "error": {"code": "INVALID_IMAGE", "message": str(exc)}

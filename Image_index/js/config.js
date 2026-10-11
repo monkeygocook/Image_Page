@@ -154,7 +154,7 @@ const I18N = {
         "err.EXPORT_FAILED": "สร้างไฟล์ผลลัพธ์ไม่สำเร็จ",
         "err.RATE_LIMITED": "ใช้งานถี่เกินไป กรุณารอสักครู่แล้วลองใหม่",
         "err.INTERNAL_ERROR": "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่",
-        "err.MODEL_UNAVAILABLE": "โมเดลยังโหลดไม่เสร็จ กรุณารอสักครู่",
+        "err.MODEL_UNAVAILABLE": "เซิร์ฟเวอร์ออฟไลน์ กรุณาลองใหม่ภายหลัง",
         "err.AI_TIMEOUT": "AI ประมวลผลนานเกินไป ลองใหม่อีกครั้ง",
         "err.AI_DOWN": "ระบบ AI ไม่พร้อมใช้งานชั่วคราว",
         "err.EMAIL_TAKEN": "อีเมลนี้ถูกใช้แล้ว",
@@ -272,7 +272,7 @@ const I18N = {
         "err.EXPORT_FAILED": "Could not build the result file",
         "err.RATE_LIMITED": "Too many requests. Please wait a moment.",
         "err.INTERNAL_ERROR": "Server error. Please try again.",
-        "err.MODEL_UNAVAILABLE": "The model is still loading. Please wait.",
+        "err.MODEL_UNAVAILABLE": "Server Offline. Please try again later.",
         "err.AI_TIMEOUT": "The AI took too long to respond. Please try again.",
         "err.AI_DOWN": "The AI service is temporarily unavailable.",
         "err.EMAIL_TAKEN": "That email is already registered",
@@ -358,17 +358,7 @@ const TAB_CONFIG = {
         cta: { th: "สร้างภาพ", en: "Generate" },
         hint: { th: "อธิบายภาพที่ต้องการให้ละเอียด", en: "Describe your image in detail" },
         returns: "image/png",
-        fields: {
-            size: {
-                kind: "enum", label: { th: "ขนาดภาพ", en: "Image size" }, default: "512x768",
-                values: [
-                    { v: "512x512", th: "จัตุรัส 512×512", en: "Square 512×512" },
-                    { v: "512x768", th: "แนวตั้ง 512×768", en: "Portrait 512×768" },
-                    { v: "768x512", th: "แนวนอน 768×512", en: "Landscape 768×512" },
-                    { v: "768x768", th: "จัตุรัสใหญ่ 768×768", en: "Large square 768×768" },
-                ],
-            },
-        },
+        fields: {},
     },
 
     back: {
