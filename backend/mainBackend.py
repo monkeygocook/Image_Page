@@ -26,10 +26,8 @@ log = logging.getLogger("backend")
 #uvicorn mainBackend:app --host 127.0.0.1 --port 5051
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-AI_URL = os.getenv("AI_URL", "http://172.20.56.100:8000").rstrip("/")  # <- ใส่ IP ของ AI
+    level=logging.INFO,format="%(asctime)s %(levelname)s %(name)s: %(message)s",)
+AI_URL = os.getenv("AI_URL", "http://26.84.90.188:8000").rstrip("/")  # <- ใส่ IP ของ AI
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")
@@ -447,6 +445,8 @@ def _make_ai_forwarder(name: str, ai_path: str):
     async def forward(request: Request, u: dict = Depends(me_user)):
         ctype = request.headers.get("content-type", "")
 
+        opts = {}
+
         # กันก่อนอ่าน body: ดู Content-Length ก่อน จะได้ไม่โหลดไฟล์ยักษ์เข้าแรม
         cl = request.headers.get("content-length")
         if cl and cl.isdigit() and int(cl) > AI_MAX_BODY:
@@ -461,6 +461,9 @@ def _make_ai_forwarder(name: str, ai_path: str):
                 return err("VALIDATION_ERROR", "ต้องส่งเป็น multipart/form-data", 415)
             form = await request.form()          # แกะจาก body ที่แคชไว้แล้ว
             f = form.get("image")
+
+            opts = {k: v for k, v in form.items() if isinstance(v, str)}
+
             if not isinstance(f, StarletteUpload):
                 return err("VALIDATION_ERROR", "ไม่พบไฟล์ภาพในฟิลด์ image", 422)
             if f.content_type not in ACCEPT:
@@ -477,21 +480,30 @@ def _make_ai_forwarder(name: str, ai_path: str):
         # ส่ง Content-Type เดิมต่อ (multipart boundary / json) ไม่ต้องแปลงอะไร
         headers = {"content-type": request.headers.get("content-type", "application/octet-stream")}
 
+        ip = request.client.host if request.client else "-"
+        log.info("START %s user=%s ip=%s size=%.2fMB opts=%s", name, u["email"], ip, len(body) / 1048576, opts)
+        t0 = time.time()
+
         try:
             r = await _ai_client.post(ai_path, content=body, headers=headers)
         except httpx.TimeoutException as exc:
-            log.error("AI timeout %s: %r", ai_path, exc)
+            #log.error("AI timeout %s: %r", ai_path, exc)
+            log.error("FAIL  %s user=%s ip=%s opts=%s -> AI timeout %.1fs %r",name, u["email"], ip, opts, time.time() - t0, exc)
             return err("AI_TIMEOUT", "AI ประมวลผลนานเกินไป", 504)
         except httpx.TransportError as exc:
-            log.error("AI down %s: %r", ai_path, exc)
+            #log.error("AI down %s: %r", ai_path, exc)
+            log.error("FAIL  %s user=%s ip=%s opts=%s -> AI down %.1fs %r",name, u["email"], ip, opts, time.time() - t0, exc)
             return err("AI_DOWN", "เชื่อมต่อเครื่อง AI ไม่ได้", 502)
 
         if r.status_code != 200:
             # รายละเอียดจริงเก็บใน log เท่านั้น ไม่ส่งให้ผู้ใช้
-            log.error("AI %s -> HTTP %s: %s", ai_path, r.status_code, r.text[:500])
+            #log.error("AI %s -> HTTP %s: %s", ai_path, r.status_code, r.text[:500])
+            log.error("FAIL  %s user=%s ip=%s opts=%s -> AI HTTP %s %.1fs | %s",name, u["email"], ip, opts, r.status_code, time.time() - t0, r.text[:300])
             code, msg = AI_ERR_MAP.get(r.status_code, AI_ERR_DEFAULT)
             http = r.status_code if r.status_code in AI_ERR_MAP else 502
             return err(code, msg, http)
+
+        log.info("DONE  %s user=%s ip=%s size=%.2fMB %.1fs", name, u["email"], ip, len(body) / 1048576, time.time() - t0)
 
         return Response(content=r.content,
                         media_type=r.headers.get("content-type", "image/png"))
