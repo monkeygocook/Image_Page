@@ -68,6 +68,8 @@ async def remove_bg(
 
     try:
         result = await run_queued(remove_background, image_bytes, output, refine_edge)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail={
             "error": {"code": "INVALID_IMAGE", "message": str(exc)}
