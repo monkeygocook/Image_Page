@@ -13,6 +13,9 @@ from fastapi import Header, HTTPException
 from datetime import datetime, timezone
 from fastapi import Depends
 import sqlite3
+import re
+from collections import deque
+from statistics import median
 
 import os
 import httpx
@@ -462,24 +465,81 @@ async def _prepare(request: Request, name: str):
     cl = request.headers.get("content-length")
     if cl and cl.isdigit() and int(cl) > AI_MAX_BODY:
         return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
+
     body = await request.body()
     if len(body) > AI_MAX_BODY:
         return err("FILE_TOO_LARGE", "ไฟล์ใหญ่เกินกำหนด", 413)
 
     opts = {}
+
     if needs_file:
         if not ctype.startswith("multipart/form-data"):
             return err("VALIDATION_ERROR", "ต้องส่งเป็น multipart/form-data", 415)
+
         form = await request.form()
         f = form.get("image")
-        opts = {k: v for k, v in form.items() if isinstance(v, str)}
+
+        opts = {
+            k: v for k, v in form.items()
+            if isinstance(v, str)
+        }
+
         if not isinstance(f, StarletteUpload):
             return err("VALIDATION_ERROR", "ไม่พบไฟล์ภาพในฟิลด์ image", 422)
+
         if f.content_type not in ACCEPT:
             return err("INVALID_FILE_TYPE", f"ไม่รองรับชนิดไฟล์: {f.content_type}", 415)
+
         f.file.seek(0, 2)
         if f.file.tell() > max_mb * 1024 * 1024:
             return err("FILE_TOO_LARGE", f"ไฟล์เกิน {max_mb} MB", 413)
+
+    elif name == "generate":
+        try:
+            data = json.loads(body.decode("utf-8"))
+
+            if not isinstance(data, dict):
+                return err(
+                    "VALIDATION_ERROR",
+                    "ข้อมูล Generate ต้องเป็น JSON Object",
+                    422
+                )
+
+            # รายชื่อ LoRA ที่อนุญาต
+            valid_loras = {
+                "none",
+                "pixel_art",
+                "linear_manga",
+                "outline"
+            }
+
+            lora = data.get("lora", "none")
+
+            # ตรวจสอบชนิดและค่าของ lora
+            if not isinstance(lora, str) or lora not in valid_loras:
+                return err(
+                    "VALIDATION_ERROR",
+                    "ค่า lora ไม่ถูกต้อง กรุณาใช้ none, pixel_art, linear_manga หรือ outline",
+                    422
+                )
+
+            # กำหนดค่าเริ่มต้นและส่งต่อให้ AI ด้วย
+            data["lora"] = lora
+
+            body = json.dumps(
+                data,
+                ensure_ascii=False
+            ).encode("utf-8")
+
+            opts = data
+
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return err(
+                "VALIDATION_ERROR",
+                "รูปแบบ JSON ไม่ถูกต้อง",
+                422
+            )
+
     return body, (ctype or "application/octet-stream"), opts
 
 def _make_ai_forwarder(name: str, ai_path: str):
@@ -490,21 +550,42 @@ def _make_ai_forwarder(name: str, ai_path: str):
             return err("JOB_ACTIVE", "คุณมีงานที่กำลังทำอยู่แล้ว", 409)
         if len(QUEUE) >= AI_CONCURRENCY + MAX_WAITING:
             return err("QUEUE_FULL", "คิวเต็ม กรุณาลองใหม่ภายหลัง", 503)
+        if _est_total_sec(name) > MAX_WAIT_SEC:       # BE-19
+            return err("QUEUE_FULL", "ระบบมีผู้ใช้งานจำนวนมาก กรุณาลองใหม่ภายหลัง", 503)
 
-        p = await _prepare(request, name)
+        # BE-17: ลงทะเบียนงานทันทีก่อนอ่านไฟล์ เพื่อให้ frontend ถามสถานะได้ไม่เจอ 404
+        j = Job(u["email"], name, request.headers.get("X-Request-ID"))
+        if j.id in JOBS:
+            return err("DUPLICATE_REQUEST", "รหัสคำขอนี้ถูกใช้แล้ว", 409)
+        JOBS[j.id] = j
+
+        try:
+            p = await _prepare(request, name)
+        except BaseException:
+            JOBS.pop(j.id, None)
+            raise
         if isinstance(p, JSONResponse):
+            JOBS.pop(j.id, None)
             return p
         body, ctype, opts = p
 
         ip = request.client.host if request.client else "-"
-        j = Job(u["email"], name)
-        JOBS[j.id] = j
         QUEUE.append(j.id)
         j.task = asyncio.create_task(_run_job(j, ai_path, body, ctype, ip))
+        j.task.add_done_callback(_task_done(j))
         log.info("JOB NEW %s user=%s ip=%s opts=%s queue=%d", name, u["email"], ip, opts, len(QUEUE))
 
         # Keep compatibility with existing frontend code that expects image bytes.
-        await j.task
+        # BE-20: ถ้าผู้ใช้ตัดการเชื่อมต่อ ให้ยกเลิกงาน (เอาออกจากคิว)
+        try:
+            while not j.task.done():
+                if await request.is_disconnected():
+                    j.task.cancel()
+                    break
+                await asyncio.wait({j.task}, timeout=1)
+        except asyncio.CancelledError:
+            j.task.cancel()
+            raise
         if j.status == "done":
             return Response(content=j.result, media_type=j.media)
         if j.status == "error":
@@ -518,9 +599,12 @@ AI_CONCURRENCY = int(os.getenv("AI_CONCURRENCY", "1"))   # ต้องเท่
 MAX_WAITING    = int(os.getenv("MAX_WAITING", "10"))
 JOB_TTL        = 600                                      # เก็บผลไว้ 10 นาที
 
+_RID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
 class Job:
-    def __init__(self, owner: str, name: str):
-        self.id = uuid.uuid4().hex
+    def __init__(self, owner: str, name: str, rid: str | None = None):
+        # BE-17: ใช้รหัสจาก X-Request-ID ของ frontend ห้ามสร้างทับ (ถ้าไม่ส่งมา/รูปแบบผิด ค่อยสุ่มเอง)
+        self.id = rid if rid and _RID.match(rid) else uuid.uuid4().hex
         self.owner, self.name = owner, name
         self.status: str = "queued"      # queued | running | done | error | cancelled
         self.result: bytes = b""
@@ -538,6 +622,34 @@ _cond = asyncio.Condition()
 async def _notify():
     async with _cond:
         _cond.notify_all()
+
+# BE-18/19: เวลาประมวลผลจริง (ไม่รวมรอคิว) 20 ครั้งล่าสุดของแต่ละเครื่องมือ ทุกผู้ใช้รวมกัน
+DURATIONS: dict[str, deque] = {}
+DEFAULT_SEC = 10.0          # ใช้ประเมินตอนยังไม่มีสถิติ
+MAX_WAIT_SEC = 300          # BE-19: คาดว่าเกินนี้ให้ปฏิเสธตั้งแต่รับคำขอ
+
+def _avg(name: str) -> float:
+    d = DURATIONS.get(name)
+    return median(d) if d else DEFAULT_SEC
+
+def _est_total_sec(name: str) -> float:
+    """เวลารอคิว + เวลาประมวลผลของงานใหม่ที่คาดไว้"""
+    waiting = sum(_avg(JOBS[i].name) for i in QUEUE if i in JOBS) / AI_CONCURRENCY
+    return waiting + _avg(name)
+
+_STATE = {"queued": "queued", "running": "processing", "done": "done",
+          "error": "failed", "cancelled": "failed"}
+
+def _task_done(j: Job):
+    """BE-20: ถ้า task ถูก cancel ก่อนเริ่มรัน finally ใน _run_job จะไม่ทำงาน ต้องเอาออกจากคิวที่นี่ด้วย"""
+    def cb(t):
+        if j.id in QUEUE:
+            QUEUE.remove(j.id)
+        if t.cancelled():
+            j.status = "cancelled"
+            if j.finished is None:
+                j.finished = time.time()
+    return cb
 
 def _snapshot(j: Job) -> dict:
     s: dict = {"job_id": j.id, "status": j.status}
@@ -568,6 +680,7 @@ async def _run_job(
     try:
         async with _slots:
             j.status = "running"
+            t1 = time.time()
             log.info("JOB START %s user=%s ip=%s", j.name, j.owner, ip)
             await _notify()
             r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
@@ -579,6 +692,7 @@ async def _run_job(
             j.result = r.content
             j.media = r.headers.get("content-type", "image/png")
             j.status = "done"
+            DURATIONS.setdefault(j.name, deque(maxlen=20)).append(time.time() - t1)
             log.info("JOB DONE %s user=%s %.1fs", j.name, j.owner, time.time() - t0)
     except asyncio.CancelledError:
         j.status = "cancelled"
@@ -607,19 +721,42 @@ async def create_job(name: str, request: Request, u: dict = Depends(me_user)):
         return err("JOB_ACTIVE", "คุณมีงานที่กำลังทำอยู่แล้ว", 409)
     if len(QUEUE) >= AI_CONCURRENCY + MAX_WAITING:
         return err("QUEUE_FULL", "คิวเต็ม กรุณาลองใหม่ภายหลัง", 503)
+    if _est_total_sec(name) > MAX_WAIT_SEC:           # BE-19
+        return err("QUEUE_FULL", "ระบบมีผู้ใช้งานจำนวนมาก กรุณาลองใหม่ภายหลัง", 503)
 
-    p = await _prepare(request, name)
+    j = Job(u["email"], name, request.headers.get("X-Request-ID"))   # BE-17
+    if j.id in JOBS:
+        return err("DUPLICATE_REQUEST", "รหัสคำขอนี้ถูกใช้แล้ว", 409)
+    JOBS[j.id] = j
+
+    try:
+        p = await _prepare(request, name)
+    except BaseException:
+        JOBS.pop(j.id, None)
+        raise
     if isinstance(p, JSONResponse):
+        JOBS.pop(j.id, None)
         return p
     body, ctype, opts = p
 
     ip = request.client.host if request.client else "-"
-    j = Job(u["email"], name)
-    JOBS[j.id] = j
     QUEUE.append(j.id)
     j.task = asyncio.create_task(_run_job(j, AI_ROUTES[name], body, ctype, ip))
+    j.task.add_done_callback(_task_done(j))
     log.info("JOB NEW %s user=%s ip=%s opts=%s queue=%d", name, u["email"], ip, opts, len(QUEUE))
     return _snapshot(j)
+
+
+@app.get("/api/v1/queue/{request_id}")           # BE-18
+async def queue_state(request_id: str, u: dict = Depends(me_user)):
+    j = _get_job(request_id, u)                   # 404 ถ้าไม่รู้จัก หรือไม่ใช่ของเจ้าของ token
+    s: dict = {"request_id": j.id, "state": _STATE[j.status]}
+    if j.status == "queued" and j.id in QUEUE:
+        s["position"] = QUEUE.index(j.id) - AI_CONCURRENCY + 1   # 1 = คิวถัดไป
+        s["total"] = len(QUEUE)
+    if j.name in DURATIONS:
+        s["avg_process_sec"] = round(_avg(j.name), 1)
+    return s
 
 
 @app.get("/api/v1/jobs/{job_id}")                 # สำหรับ polling สำรอง
@@ -860,5 +997,3 @@ async def seed_staff():
         print(f"[seed] staff = {email}")
 
     conn.close()
-
-
