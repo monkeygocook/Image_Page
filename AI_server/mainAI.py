@@ -17,11 +17,19 @@ from services.output_store import save_output
 
 app = FastAPI()
 
-# Only MAX_CONCURRENT_JOBS heavy jobs run at once; others wait in the queue.
-MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "1"))
-MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", "10"))
-_job_slots = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
-_pending_jobs = 0
+# คิวแยก 2 สาย (lane) — งานสร้างภาพที่รอ Forge นาน ๆ ไม่ขวางงานแต่งภาพ
+#   gen : /generate
+#   img : /remove-background, /blur, /filter, /adjust
+# ค่า MAX_CONCURRENT_* ต้องเท่ากับ GEN_CONCURRENCY / IMG_CONCURRENCY ของ backend
+LANE_LIMITS = {
+    # lane: (รันพร้อมกันได้กี่งาน, รอคิวได้กี่งาน)
+    "gen": (int(os.getenv("MAX_CONCURRENT_GEN", "1")),
+            int(os.getenv("MAX_QUEUE_GEN", os.getenv("MAX_QUEUE_SIZE", "10")))),
+    "img": (int(os.getenv("MAX_CONCURRENT_IMG", os.getenv("MAX_CONCURRENT_JOBS", "1"))),
+            int(os.getenv("MAX_QUEUE_IMG", os.getenv("MAX_QUEUE_SIZE", "10")))),
+}
+_job_slots = {lane: asyncio.Semaphore(c) for lane, (c, _) in LANE_LIMITS.items()}
+_pending_jobs = {lane: 0 for lane in LANE_LIMITS}
 
 
 def _run_and_save(func, *args, **kwargs):
@@ -31,26 +39,29 @@ def _run_and_save(func, *args, **kwargs):
     return result
 
 
-async def run_queued(func, *args, **kwargs):
-    global _pending_jobs
-    if _pending_jobs >= MAX_QUEUE_SIZE + MAX_CONCURRENT_JOBS:
+async def run_queued(func, *args, lane: str = "img", **kwargs):
+    concurrent, max_queue = LANE_LIMITS[lane]
+    if _pending_jobs[lane] >= max_queue + concurrent:
         raise HTTPException(status_code=503, detail={
             "error": {"code": "QUEUE_FULL", "message": "Server is busy, please try again later"}
         })
-    _pending_jobs += 1
+    _pending_jobs[lane] += 1
     try:
-        async with _job_slots:
+        async with _job_slots[lane]:
             return await run_in_threadpool(_run_and_save, func, *args, **kwargs)
     finally:
-        _pending_jobs -= 1
+        _pending_jobs[lane] -= 1
 
 
 @app.get("/queue")
 def queue_status():
     return {
-        "pending": _pending_jobs,
-        "max_concurrent": MAX_CONCURRENT_JOBS,
-        "max_queue": MAX_QUEUE_SIZE,
+        lane: {
+            "pending": _pending_jobs[lane],
+            "max_concurrent": concurrent,
+            "max_queue": max_queue,
+        }
+        for lane, (concurrent, max_queue) in LANE_LIMITS.items()
     }
 
 BLUR_HANDLERS = {
@@ -126,6 +137,7 @@ async def generate(req: GenerateRequest):
     try:
         image = await run_queued(
             generate_image,
+            lane="gen",
             prompt=prompt,
             negative_prompt=(req.negative_prompt or "").strip(),
             seed=req.seed if req.seed is not None else -1,

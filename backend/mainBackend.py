@@ -545,13 +545,9 @@ async def _prepare(request: Request, name: str):
 def _make_ai_forwarder(name: str, ai_path: str):
     """Compatibility endpoint: preserve the old image response, but run via the job queue."""
     async def forward(request: Request, u: dict = Depends(me_user)):
-        # Direct-style URLs are also queued, so every AI operation uses _slots.
-        if any(JOBS[i].owner == u["email"] for i in QUEUE):
-            return err("JOB_ACTIVE", "คุณมีงานที่กำลังทำอยู่แล้ว", 409)
-        if len(QUEUE) >= AI_CONCURRENCY + MAX_WAITING:
-            return err("QUEUE_FULL", "คิวเต็ม กรุณาลองใหม่ภายหลัง", 503)
-        if _est_total_sec(name) > MAX_WAIT_SEC:       # BE-19
-            return err("QUEUE_FULL", "ระบบมีผู้ใช้งานจำนวนมาก กรุณาลองใหม่ภายหลัง", 503)
+        # Direct-style URLs are also queued, so every AI operation uses a lane's slots.
+        if (e := _admit(u, name)) is not None:
+            return e
 
         # BE-17: ลงทะเบียนงานทันทีก่อนอ่านไฟล์ เพื่อให้ frontend ถามสถานะได้ไม่เจอ 404
         j = Job(u["email"], name, request.headers.get("X-Request-ID"))
@@ -570,10 +566,7 @@ def _make_ai_forwarder(name: str, ai_path: str):
         body, ctype, opts = p
 
         ip = request.client.host if request.client else "-"
-        QUEUE.append(j.id)
-        j.task = asyncio.create_task(_run_job(j, ai_path, body, ctype, ip))
-        j.task.add_done_callback(_task_done(j))
-        log.info("JOB NEW %s user=%s ip=%s opts=%s queue=%d", name, u["email"], ip, opts, len(QUEUE))
+        _start(j, ai_path, body, ctype, ip, opts)
 
         # Keep compatibility with existing frontend code that expects image bytes.
         # BE-20: ถ้าผู้ใช้ตัดการเชื่อมต่อ ให้ยกเลิกงาน (เอาออกจากคิว)
@@ -595,9 +588,32 @@ def _make_ai_forwarder(name: str, ai_path: str):
         return err("JOB_CANCELLED", "งานถูกยกเลิก", 409)
     return forward
 
-AI_CONCURRENCY = int(os.getenv("AI_CONCURRENCY", "1"))   # ต้องเท่ากับ MAX_CONCURRENT_JOBS ของ mainAI
-MAX_WAITING    = int(os.getenv("MAX_WAITING", "10"))
-JOB_TTL        = 600                                      # เก็บผลไว้ 10 นาที
+# ============================================================
+# คิวแยก 2 สาย (lane) — สายหนึ่งช้าไม่ทำให้อีกสายต้องรอ
+#   gen : generate (รอ Forge ได้นานหลายนาที)
+#   img : remove-background, blur, filter, adjust (ไม่กี่วินาที)
+# ค่า *_CONCURRENCY ต้องเท่ากับ MAX_CONCURRENT_GEN / MAX_CONCURRENT_IMG ของ mainAI
+# ============================================================
+GEN_CONCURRENCY = int(os.getenv("GEN_CONCURRENCY", "1"))
+IMG_CONCURRENCY = int(os.getenv("IMG_CONCURRENCY", os.getenv("AI_CONCURRENCY", "1")))
+GEN_MAX_WAITING = int(os.getenv("GEN_MAX_WAITING", os.getenv("MAX_WAITING", "10")))
+IMG_MAX_WAITING = int(os.getenv("IMG_MAX_WAITING", os.getenv("MAX_WAITING", "10")))
+JOB_TTL         = 600                                     # เก็บผลไว้ 10 นาที
+
+def _lane(name: str) -> str:
+    return "gen" if name == "generate" else "img"
+
+class Lane:
+    def __init__(self, concurrency: int, max_waiting: int):
+        self.concurrency = concurrency
+        self.max_waiting = max_waiting
+        self.queue: list[str] = []             # งานที่ยังไม่จบในสายนี้ เรียงตามลำดับเข้า (FIFO)
+        self.slots = asyncio.Semaphore(concurrency)
+
+LANES: dict[str, Lane] = {
+    "gen": Lane(GEN_CONCURRENCY, GEN_MAX_WAITING),
+    "img": Lane(IMG_CONCURRENCY, IMG_MAX_WAITING),
+}
 
 _RID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
@@ -606,6 +622,7 @@ class Job:
         # BE-17: ใช้รหัสจาก X-Request-ID ของ frontend ห้ามสร้างทับ (ถ้าไม่ส่งมา/รูปแบบผิด ค่อยสุ่มเอง)
         self.id = rid if rid and _RID.match(rid) else uuid.uuid4().hex
         self.owner, self.name = owner, name
+        self.lane = _lane(name)
         self.status: str = "queued"      # queued | running | done | error | cancelled
         self.result: bytes = b""
         self.media: str = "image/png"
@@ -615,8 +632,6 @@ class Job:
         self.task: asyncio.Task | None = None
 
 JOBS: dict[str, Job] = {}
-QUEUE: list[str] = []                    # งานที่ยังไม่จบ เรียงตามลำดับเข้า
-_slots = asyncio.Semaphore(AI_CONCURRENCY)
 _cond = asyncio.Condition()
 
 async def _notify():
@@ -633,9 +648,33 @@ def _avg(name: str) -> float:
     return median(d) if d else DEFAULT_SEC
 
 def _est_total_sec(name: str) -> float:
-    """เวลารอคิว + เวลาประมวลผลของงานใหม่ที่คาดไว้"""
-    waiting = sum(_avg(JOBS[i].name) for i in QUEUE if i in JOBS) / AI_CONCURRENCY
+    """เวลารอคิว + เวลาประมวลผลของงานใหม่ที่คาดไว้ (นับเฉพาะสายเดียวกัน)"""
+    lane = LANES[_lane(name)]
+    waiting = sum(_avg(JOBS[i].name) for i in lane.queue if i in JOBS) / lane.concurrency
     return waiting + _avg(name)
+
+def _active_job_ids():
+    for lane in LANES.values():
+        yield from lane.queue
+
+def _admit(u: dict, name: str):
+    """ตรวจก่อนรับงาน: คืน error response หรือ None ถ้ารับได้"""
+    if any(JOBS[i].owner == u["email"] for i in _active_job_ids()):   # 1 คน 1 งานต่อครั้ง
+        return err("JOB_ACTIVE", "คุณมีงานที่กำลังทำอยู่แล้ว", 409)
+    lane = LANES[_lane(name)]
+    if len(lane.queue) >= lane.concurrency + lane.max_waiting:
+        return err("QUEUE_FULL", "คิวเต็ม กรุณาลองใหม่ภายหลัง", 503)
+    if _est_total_sec(name) > MAX_WAIT_SEC:                           # BE-19
+        return err("QUEUE_FULL", "ระบบมีผู้ใช้งานจำนวนมาก กรุณาลองใหม่ภายหลัง", 503)
+    return None
+
+def _start(j: "Job", ai_path: str, body: bytes, ctype: str, ip: str, opts: dict):
+    lane = LANES[j.lane]
+    lane.queue.append(j.id)
+    j.task = asyncio.create_task(_run_job(j, ai_path, body, ctype, ip))
+    j.task.add_done_callback(_task_done(j))
+    log.info("JOB NEW %s lane=%s user=%s ip=%s opts=%s queue=%d",
+             j.name, j.lane, j.owner, ip, opts, len(lane.queue))
 
 _STATE = {"queued": "queued", "running": "processing", "done": "done",
           "error": "failed", "cancelled": "failed"}
@@ -643,8 +682,9 @@ _STATE = {"queued": "queued", "running": "processing", "done": "done",
 def _task_done(j: Job):
     """BE-20: ถ้า task ถูก cancel ก่อนเริ่มรัน finally ใน _run_job จะไม่ทำงาน ต้องเอาออกจากคิวที่นี่ด้วย"""
     def cb(t):
-        if j.id in QUEUE:
-            QUEUE.remove(j.id)
+        q = LANES[j.lane].queue
+        if j.id in q:
+            q.remove(j.id)
         if t.cancelled():
             j.status = "cancelled"
             if j.finished is None:
@@ -652,13 +692,13 @@ def _task_done(j: Job):
     return cb
 
 def _snapshot(j: Job) -> dict:
-    s: dict = {"job_id": j.id, "status": j.status}
-    #s = {"job_id": j.id, "status": j.status}
-    if j.status == "queued" and j.id in QUEUE:
-        ahead = QUEUE.index(j.id)                 # รวมงานที่กำลังรันอยู่
-        s["position"] = ahead - AI_CONCURRENCY + 1  # 1 = คิวถัดไป
+    s: dict = {"job_id": j.id, "status": j.status, "lane": j.lane}
+    lane = LANES[j.lane]
+    if j.status == "queued" and j.id in lane.queue:
+        ahead = lane.queue.index(j.id)                  # รวมงานที่กำลังรันอยู่ในสายเดียวกัน
+        s["position"] = ahead - lane.concurrency + 1    # 1 = คิวถัดไป
         s["ahead"] = ahead
-        s["total"] = len(QUEUE)
+        s["total"] = len(lane.queue)
     if j.status == "error":
         s["error"] = {"code": j.err_code, "message": j.err_msg}
     return s
@@ -677,11 +717,12 @@ async def _run_job(
     ip: str = "-",
 ):
     t0 = time.time()
+    lane = LANES[j.lane]
     try:
-        async with _slots:
+        async with lane.slots:
             j.status = "running"
             t1 = time.time()
-            log.info("JOB START %s user=%s ip=%s", j.name, j.owner, ip)
+            log.info("JOB START %s lane=%s user=%s ip=%s", j.name, j.lane, j.owner, ip)
             await _notify()
             r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
         if r.status_code != 200:
@@ -708,8 +749,8 @@ async def _run_job(
         j.status, j.err_code, j.err_msg = "error", *AI_ERR_DEFAULT
     finally:
         j.finished = time.time()
-        if j.id in QUEUE:
-            QUEUE.remove(j.id)
+        if j.id in lane.queue:
+            lane.queue.remove(j.id)
         await _notify()
 
 
@@ -717,12 +758,8 @@ async def _run_job(
 async def create_job(name: str, request: Request, u: dict = Depends(me_user)):
     if name not in AI_ROUTES:
         return err("NOT_FOUND", "ไม่พบข้อมูลที่ต้องการ", 404)
-    if any(JOBS[i].owner == u["email"] for i in QUEUE):          # 1 คน 1 งานต่อครั้ง
-        return err("JOB_ACTIVE", "คุณมีงานที่กำลังทำอยู่แล้ว", 409)
-    if len(QUEUE) >= AI_CONCURRENCY + MAX_WAITING:
-        return err("QUEUE_FULL", "คิวเต็ม กรุณาลองใหม่ภายหลัง", 503)
-    if _est_total_sec(name) > MAX_WAIT_SEC:           # BE-19
-        return err("QUEUE_FULL", "ระบบมีผู้ใช้งานจำนวนมาก กรุณาลองใหม่ภายหลัง", 503)
+    if (e := _admit(u, name)) is not None:
+        return e
 
     j = Job(u["email"], name, request.headers.get("X-Request-ID"))   # BE-17
     if j.id in JOBS:
@@ -740,20 +777,26 @@ async def create_job(name: str, request: Request, u: dict = Depends(me_user)):
     body, ctype, opts = p
 
     ip = request.client.host if request.client else "-"
-    QUEUE.append(j.id)
-    j.task = asyncio.create_task(_run_job(j, AI_ROUTES[name], body, ctype, ip))
-    j.task.add_done_callback(_task_done(j))
-    log.info("JOB NEW %s user=%s ip=%s opts=%s queue=%d", name, u["email"], ip, opts, len(QUEUE))
+    _start(j, AI_ROUTES[name], body, ctype, ip, opts)
     return _snapshot(j)
+
+
+@app.get("/api/v1/queue")                         # ดูสถานะคิวทั้งสองสาย (ไม่ต้องล็อกอิน)
+async def queue_overview():
+    return {name: {"running_or_waiting": len(l.queue),
+                   "concurrency": l.concurrency,
+                   "max_waiting": l.max_waiting}
+            for name, l in LANES.items()}
 
 
 @app.get("/api/v1/queue/{request_id}")           # BE-18
 async def queue_state(request_id: str, u: dict = Depends(me_user)):
     j = _get_job(request_id, u)                   # 404 ถ้าไม่รู้จัก หรือไม่ใช่ของเจ้าของ token
-    s: dict = {"request_id": j.id, "state": _STATE[j.status]}
-    if j.status == "queued" and j.id in QUEUE:
-        s["position"] = QUEUE.index(j.id) - AI_CONCURRENCY + 1   # 1 = คิวถัดไป
-        s["total"] = len(QUEUE)
+    s: dict = {"request_id": j.id, "state": _STATE[j.status], "lane": j.lane}
+    lane = LANES[j.lane]
+    if j.status == "queued" and j.id in lane.queue:
+        s["position"] = lane.queue.index(j.id) - lane.concurrency + 1   # 1 = คิวถัดไป
+        s["total"] = len(lane.queue)
     if j.name in DURATIONS:
         s["avg_process_sec"] = round(_avg(j.name), 1)
     return s
@@ -996,4 +1039,4 @@ async def seed_staff():
 
         print(f"[seed] staff = {email}")
 
-    conn.close()
+    conn.close()
