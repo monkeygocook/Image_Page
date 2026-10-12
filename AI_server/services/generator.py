@@ -20,9 +20,9 @@ DEFAULT_SIZE = "512x768"
 
 # LoRA ที่อนุญาต (SDXL) — key คือชื่อที่หน้าเว็บส่งมา, file ต้องตรงกับชื่อไฟล์ใน models/Lora
 LORAS = {
-    "pixel_art": {"file": "pixel-art-xl-v1.1", "trigger": "pixel art", "weight": 1.0},
-    "outline": {"file": "outline_xl_kohaku_delta_spv5x", "trigger": "", "weight": 0.8},
-    "linear_manga": {"file": "LineAniRedmondV2-Lineart-LineAniAF", "trigger": "lineart, LineAniAF", "weight": 0.8},
+    "pixel_art": {"file": "pixelbuildings128-v2", "trigger": "", "weight": 1.0},
+    "outline": {"file": "outline_xl_kohaku_delta_spv5x", "trigger": "", "weight": 1.0},
+    "linear_manga": {"file": "LineAniRedmondV2-Lineart-LineAniAF", "trigger": "lineart, LineAniAF", "weight": 1.0},
 }
 
 
