@@ -8,7 +8,7 @@ from pathlib import Path
 log = logging.getLogger("output_store")
 
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", Path(__file__).resolve().parent.parent / "outputs"))
-MAX_OUTPUTS = int(os.getenv("MAX_OUTPUTS", "20"))
+MAX_OUTPUTS = int(os.getenv("MAX_OUTPUTS", "5"))
 
 _lock = threading.Lock()
 
