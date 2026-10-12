@@ -81,8 +81,16 @@ def generate_image(
             "ระบบสร้างภาพเกิดข้อผิดพลาด กรุณาลองใหม่"
         ) from exc
 
-    result = response.json()
-
-    image_base64 = result["images"][0]
-
-    return base64.b64decode(image_base64)
+    # คำตอบจาก Forge ผิดรูปแบบ = ฝั่ง Forge มีปัญหา ไม่ใช่ข้อมูลผู้ใช้ผิด
+    # จึงต้องเป็น RuntimeError (-> 503) ไม่ใช่ ValueError (-> 422)
+    try:
+        result = response.json()
+        image_base64 = result["images"][0]
+        if "," in image_base64[:100]:            # กันกรณีมี data:image/png;base64, นำหน้า
+            image_base64 = image_base64.split(",", 1)[1]
+        return base64.b64decode(image_base64)
+    except Exception as exc:
+        log.error("Forge ตอบกลับผิดรูปแบบ (HTTP %s): %s", response.status_code, response.text[:300])
+        raise RuntimeError(
+            "ระบบสร้างภาพเกิดข้อผิดพลาด กรุณาลองใหม่"
+        ) from exc

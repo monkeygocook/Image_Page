@@ -140,6 +140,14 @@ const I18N = {
         "hint.error": "ผิดพลาด: {msg}",
         "hint.reqId": " (รหัสอ้างอิง: {id})",
 
+        /* ---------- คิว ---------- */
+        "err.QUEUE_FULL": "คิวเต็ม กรุณาลองใหม่ภายหลัง",
+        "err.JOB_ACTIVE": "คุณมีงานที่กำลังทำอยู่แล้ว",
+        "err.NOT_READY": "งานยังไม่เสร็จ",
+        "job.queued": "อยู่ในคิวลำดับที่ {n}",
+        "job.running": "กำลังประมวลผล...",
+
+
         /* ---------- ข้อความผิดพลาดจาก API ---------- */
         "err.NETWORK": "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบว่าหลังบ้านเปิดอยู่หรือไม่",
         "err.TIMEOUT": "เซิร์ฟเวอร์ใช้เวลานานเกินไป ลองใหม่อีกครั้ง",
@@ -154,7 +162,7 @@ const I18N = {
         "err.EXPORT_FAILED": "สร้างไฟล์ผลลัพธ์ไม่สำเร็จ",
         "err.RATE_LIMITED": "ใช้งานถี่เกินไป กรุณารอสักครู่แล้วลองใหม่",
         "err.INTERNAL_ERROR": "เซิร์ฟเวอร์เกิดข้อผิดพลาด กรุณาลองใหม่",
-        "err.MODEL_UNAVAILABLE": "โมเดลยังโหลดไม่เสร็จ กรุณารอสักครู่",
+        "err.MODEL_UNAVAILABLE": "เซิร์ฟเวอร์ออฟไลน์ กรุณาลองใหม่ภายหลัง",
         "err.AI_TIMEOUT": "AI ประมวลผลนานเกินไป ลองใหม่อีกครั้ง",
         "err.AI_DOWN": "ระบบ AI ไม่พร้อมใช้งานชั่วคราว",
         "err.EMAIL_TAKEN": "อีเมลนี้ถูกใช้แล้ว",
@@ -259,6 +267,13 @@ const I18N = {
         "hint.error": "Error: {msg}",
         "hint.reqId": " (request id: {id})",
 
+        /* ---------- คิว ---------- */
+                "err.QUEUE_FULL": "Queue is full. Please try again later.",
+        "err.JOB_ACTIVE": "You already have a job in progress.",
+        "err.NOT_READY": "The job is not ready yet.",
+        "job.queued": "You are #{n} in the queue",
+        "job.running": "Processing...",
+
         "err.NETWORK": "Cannot reach the server. Is the backend running?",
         "err.TIMEOUT": "The server took too long. Please try again.",
         "err.UNAUTHORIZED": "Your session expired. Please sign in again.",
@@ -272,7 +287,7 @@ const I18N = {
         "err.EXPORT_FAILED": "Could not build the result file",
         "err.RATE_LIMITED": "Too many requests. Please wait a moment.",
         "err.INTERNAL_ERROR": "Server error. Please try again.",
-        "err.MODEL_UNAVAILABLE": "The model is still loading. Please wait.",
+        "err.MODEL_UNAVAILABLE": "Server Offline. Please try again later.",
         "err.AI_TIMEOUT": "The AI took too long to respond. Please try again.",
         "err.AI_DOWN": "The AI service is temporarily unavailable.",
         "err.EMAIL_TAKEN": "That email is already registered",

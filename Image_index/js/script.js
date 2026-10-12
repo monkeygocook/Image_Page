@@ -86,6 +86,8 @@ function errMsg(err) {
     if (!err) return t("err.UNKNOWN");
     const key = "err." + (err.code || "UNKNOWN");
     let msg = I18N[lang][key] || err.message || t("err.UNKNOWN");
+    // error ที่ไม่มีรหัส (เช่น การเชื่อมต่อหลุด) -> โชว์สาเหตุจริงต่อท้าย จะได้ไล่ปัญหาได้
+    if ((!err.code || err.code === "UNKNOWN") && err.message) msg += ` (${err.message})`;
     if (err.code === "RATE_LIMITED" && err.retryAfter) msg += ` (${err.retryAfter}s)`;
     if (err.requestId) msg += t("hint.reqId", { id: err.requestId });
     return msg;
@@ -467,7 +469,7 @@ $("genForm").addEventListener("submit", async (e) => {
     clearResult();
     setBusy(true);
     try {
-        const url = await Api.image.process({
+        const url = await Api.image.processJob({          // 1) เปลี่ยนชื่อ process -> processJob
             tab: currentTab,
             cfg,
             file: currentFile,
@@ -476,6 +478,14 @@ $("genForm").addEventListener("submit", async (e) => {
             options: optionState,
             previewUrl: previewURL(),
             signal: inflight.signal,
+            onStatus: (s) => {                            // 2) เพิ่มบรรทัดนี้ทั้งก้อน
+                showHint(
+                    s.status === "queued"
+                        ? t("job.queued", { n: s.position })
+                        : t("job.running"),
+                    true
+                );
+            },
         });
         showResult(url, cfg.needsFile ? previewURL() : null);
         showHint(Api.isMock() ? t("hint.mock") : "", true);

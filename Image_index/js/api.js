@@ -494,6 +494,20 @@ const Api = (() => {
     };
 
     /* ---------- ประมวลผลภาพ ---------- */
+    function buildBody({ cfg, file, prompt, negative, options = {} }) {
+    if (cfg.contentType === "application/json") {
+        const p = (prompt || "").trim();
+        if (cfg.usesPrompt && !p) throw new ApiError("VALIDATION_ERROR", "กรุณากรอกคำอธิบายภาพ");
+        const payload = { prompt: p, ...options };
+        if (negative && negative.trim()) payload.negative_prompt = negative.trim();
+        return { body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } };
+    }
+    if (!file) throw new ApiError("VALIDATION_ERROR", "กรุณาเลือกไฟล์ภาพก่อน");
+    const fd = new FormData();
+    fd.append("image", file, file.name);
+    for (const [k, v] of Object.entries(options)) fd.append(k, String(v));
+    return { body: fd, headers: {} };   // ห้ามตั้ง Content-Type เอง
+    }
     const image = {
         /**
          * @returns {Promise<string>} URL ของภาพผลลัพธ์ (blob: หรือ http:)
@@ -530,6 +544,47 @@ const Api = (() => {
                     `เซิร์ฟเวอร์ไม่ได้ส่งไฟล์ภาพกลับมา (${blob?.type || "unknown"})`
                 );
             }
+            return URL.createObjectURL(blob);
+        },
+
+        // api.js — ใน image = { ... }
+        async processJob({ cfg, file, prompt, negative, options = {}, signal, onStatus }) {
+            // สร้าง body/headers เหมือน process() เดิม แล้วยิงไป /api/v1/jobs/<name>
+            const { body, headers } = buildBody({ cfg, file, prompt, negative, options });
+            const name = cfg.endpoint.split("/").pop();
+            const job = await request(`/api/v1/jobs/${name}`, { method: "POST", body, headers, signal, retry: 0 });
+            onStatus?.(job);
+
+            const onAbort = () => fetch(API_BASE + `/api/v1/jobs/${job.job_id}`,
+                { method: "DELETE", headers: { Authorization: `Bearer ${Token.get()}` } }).catch(() => { });
+            signal?.addEventListener("abort", onAbort, { once: true });
+
+            const res = await fetch(API_BASE + `/api/v1/jobs/${job.job_id}/events`, {
+                headers: { Authorization: `Bearer ${Token.get()}` }, signal,
+            });
+            if (!res.ok) throw new ApiError("INTERNAL_ERROR", `HTTP ${res.status}`, { status: res.status });
+
+            const reader = res.body.getReader(), dec = new TextDecoder();
+            let buf = "", final = null;
+            while (!final) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += dec.decode(value, { stream: true });
+                let i;
+                while ((i = buf.indexOf("\n\n")) >= 0) {
+                    const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+                    const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+                    if (!line) continue;                       // heartbeat
+                    const s = JSON.parse(line.slice(6));
+                    onStatus?.(s);
+                    if (["done", "error", "cancelled"].includes(s.status)) final = s;
+                }
+            }
+            signal?.removeEventListener("abort", onAbort);
+            if (!final || final.status === "cancelled") { const a = new Error("aborted"); a.name = "AbortError"; throw a; }
+            if (final.status === "error") throw new ApiError(final.error.code, final.error.message);
+
+            const blob = await request(`/api/v1/jobs/${job.job_id}/result`, { expect: "blob", retry: 0 });
             return URL.createObjectURL(blob);
         },
     };
