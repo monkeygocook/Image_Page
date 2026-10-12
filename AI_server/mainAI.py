@@ -3,7 +3,7 @@ import os
 
 import patch
 from fastapi.concurrency import run_in_threadpool
-from services.generator import DEFAULT_SIZE, generate_image
+from services.generator import DEFAULT_SIZE, LORAS, generate_image
 from pydantic import BaseModel
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -86,20 +86,27 @@ class GenerateRequest(BaseModel):
     negative_prompt: str = ""
     seed: int = -1
     size: str = DEFAULT_SIZE
+    loras: list[str] = []
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
+    unknown = [n for n in req.loras if n not in LORAS]
+    if unknown:
+        raise HTTPException(status_code=422, detail={
+            "error": {"code": "INVALID_LORA", "message": f"Unsupported lora: {', '.join(unknown)}"}
+        })
     try:
         image = await run_queued(
             generate_image,
             prompt=req.prompt,
             negative_prompt=req.negative_prompt,
             seed=req.seed,
-            size=req.size
+            size=req.size,
+            loras=req.loras
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
-            "error": {"code": "INVALID_SIZE", "message": str(exc)}
+            "error": {"code": "INVALID_REQUEST", "message": str(exc)}
         }) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
