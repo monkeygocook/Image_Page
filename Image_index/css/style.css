@@ -1133,3 +1133,30 @@ select:focus {
     border-radius: 99px;
     transition: width 0.2s linear;
 }
+
+/* ---------- ETA บนปุ่มสีส้ม ---------- */
+#submitBtn.eta-running {
+    position: relative;
+    overflow: hidden;
+}
+
+#submitBtn.eta-running:disabled {
+    opacity: 1;
+    /* กันไม่ให้ข้อความจางตอนปุ่มถูก disabled */
+    cursor: progress;
+}
+
+.eta-btn-label {
+    position: relative;
+    z-index: 1;
+}
+
+.eta-btn-bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 4px;
+    width: 0;
+    background: rgba(255, 255, 255, .85);
+    transition: width .25s linear;
+}
