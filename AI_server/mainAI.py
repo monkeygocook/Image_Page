@@ -88,7 +88,8 @@ class GenerateRequest(BaseModel):
     negative_prompt: Optional[str] = ""
     seed: Optional[int] = -1
     size: Optional[str] = DEFAULT_SIZE
-    loras: list[str] = []
+    # "none" / null / ไม่ส่งมา = ไม่ใช้ LoRA
+    lora: Optional[str] = "none"
 
 
 MAX_PROMPT_LEN = 2000
@@ -103,10 +104,10 @@ async def generate(req: GenerateRequest):
             "error": {"code": "INVALID_PROMPT",
                       "message": f"prompt must be 1-{MAX_PROMPT_LEN} characters"}
         })
-    unknown = [n for n in req.loras if n not in LORAS]
-    if unknown:
+    lora = (req.lora or "none").strip()
+    if lora != "none" and lora not in LORAS:
         raise HTTPException(status_code=422, detail={
-            "error": {"code": "INVALID_LORA", "message": f"Unsupported lora: {', '.join(unknown)}"}
+            "error": {"code": "INVALID_LORA", "message": f"Unsupported lora: {lora}"}
         })
     # ตรวจ size ตรงนี้ — ไม่พึ่ง except ValueError ครอบทั้งก้อน
     # เพราะ JSONDecodeError / base64 error จาก Forge ก็เป็น ValueError ด้วย
@@ -121,7 +122,7 @@ async def generate(req: GenerateRequest):
             negative_prompt=(req.negative_prompt or "").strip(),
             seed=req.seed if req.seed is not None else -1,
             size=size,
-            loras=req.loras
+            loras=[] if lora == "none" else [lora]
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={

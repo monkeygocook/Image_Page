@@ -9,7 +9,7 @@ from requests.exceptions import RequestException
 
 FORGE_URL = os.getenv("FORGE_URL", "http://127.0.0.1:7860").rstrip("/")
 
-# ขนาดที่อนุญาต (SD 1.5) — key ต้องตรงกับค่าใน config.js
+# ขนาดที่อนุญาต (ใช้กับ SDXL) — key ต้องตรงกับค่าใน config.js
 IMAGE_SIZES = {
     "512x512": (512, 512),
     "512x768": (512, 768),
@@ -22,7 +22,7 @@ DEFAULT_SIZE = "512x768"
 LORAS = {
     "pixel_art": {"file": "pixel-art-xl-v1.1", "trigger": "pixel art", "weight": 1.0},
     "outline": {"file": "outline_xl_kohaku_delta_spv5x", "trigger": "", "weight": 0.8},
-    "lineart": {"file": "LineAniRedmondV2-Lineart-LineAniAF", "trigger": "lineart, LineAniAF", "weight": 0.8},
+    "linear_manga": {"file": "LineAniRedmondV2-Lineart-LineAniAF", "trigger": "lineart, LineAniAF", "weight": 0.8},
 }
 
 
