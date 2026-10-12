@@ -1160,3 +1160,20 @@ select:focus {
     background: rgba(255, 255, 255, .85);
     transition: width .25s linear;
 }
+
+/* ---------- ช่วงรอคิว: แถบวิ่งไปมา ---------- */
+#submitBtn.eta-queued .eta-btn-bar {
+    width: 30% !important;
+    transition: none;
+    animation: eta-queue-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes eta-queue-slide {
+    from {
+        left: -30%;
+    }
+
+    to {
+        left: 100%;
+    }
+}
