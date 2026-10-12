@@ -495,28 +495,33 @@ const Api = (() => {
 
     /* ---------- ประมวลผลภาพ ---------- */
     function buildBody({ cfg, file, prompt, negative, options = {} }) {
-    if (cfg.contentType === "application/json") {
-        const p = (prompt || "").trim();
-        if (cfg.usesPrompt && !p) throw new ApiError("VALIDATION_ERROR", "กรุณากรอกคำอธิบายภาพ");
-        const payload = { prompt: p, ...options };
-        if (negative && negative.trim()) payload.negative_prompt = negative.trim();
-        return { body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } };
-    }
-    if (!file) throw new ApiError("VALIDATION_ERROR", "กรุณาเลือกไฟล์ภาพก่อน");
-    const fd = new FormData();
-    fd.append("image", file, file.name);
-    for (const [k, v] of Object.entries(options)) fd.append(k, String(v));
-    return { body: fd, headers: {} };   // ห้ามตั้ง Content-Type เอง
+        if (cfg.contentType === "application/json") {
+            const p = (prompt || "").trim();
+            if (cfg.usesPrompt && !p) throw new ApiError("VALIDATION_ERROR", "กรุณากรอกคำอธิบายภาพ");
+            const payload = { prompt: p, ...options };
+            if (negative && negative.trim()) payload.negative_prompt = negative.trim();
+            return { body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } };
+        }
+        if (!file) throw new ApiError("VALIDATION_ERROR", "กรุณาเลือกไฟล์ภาพก่อน");
+        const fd = new FormData();
+        fd.append("image", file, file.name);
+        for (const [k, v] of Object.entries(options)) fd.append(k, String(v));
+        return { body: fd, headers: {} };   // ห้ามตั้ง Content-Type เอง
     }
     const image = {
         /**
          * @returns {Promise<string>} URL ของภาพผลลัพธ์ (blob: หรือ http:)
          */
-        async process({ tab, cfg, file, prompt, negative, options = {}, previewUrl, signal }) {
+        async process({ tab, cfg, file, prompt, negative, options = {}, previewUrl, signal, requestId }) {
+            // 2) ตรงที่สร้าง headers ให้เพิ่มบรรทัดนี้
+            let headers = {};
+
+            if (requestId) headers["X-Request-ID"] = requestId;
+            /*
             // โหมดจำลอง — ใช้เครื่องจำลอง canvas ในส่วนที่ 5
             if (isMock()) return mockProcessImage({ tab, cfg, options, previewUrl, signal });
 
-            let body, headers;
+            let body, headers; */
 
             if (cfg.contentType === "application/json") {
                 const p = (prompt || "").trim();
