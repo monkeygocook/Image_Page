@@ -146,6 +146,12 @@ const I18N = {
         "err.NOT_READY": "งานยังไม่เสร็จ",
         "job.queued": "อยู่ในคิวลำดับที่ {n}",
         "job.running": "กำลังประมวลผล...",
+        "eta.sending": "กำลังส่ง...",
+        "eta.queue": "คิวที่ {n} จาก {total} · รอมา {time}",
+        "eta.leftMin": "เหลือ ~{n} นาที",
+        "eta.leftSec": "เหลือ ~{n} วิ",
+        "eta.almost": "ใกล้เสร็จแล้ว...",
+        "eta.slow": "นานกว่าปกติ...",
 
 
         /* ---------- ข้อความผิดพลาดจาก API ---------- */
@@ -273,6 +279,12 @@ const I18N = {
         "err.NOT_READY": "The job is not ready yet.",
         "job.queued": "You are #{n} in the queue",
         "job.running": "Processing...",
+        "eta.sending": "Sending...",
+        "eta.queue": "Queue {n} of {total} · waited {time}",
+        "eta.leftMin": "~{n} min left",
+        "eta.leftSec": "~{n}s left",
+        "eta.almost": "Almost done...",
+        "eta.slow": "Taking longer than usual...",
 
         "err.NETWORK": "Cannot reach the server. Is the backend running?",
         "err.TIMEOUT": "The server took too long. Please try again.",
@@ -508,4 +520,4 @@ const TAB_CONFIG = {
             },
         },
     },
-}; 
+}; 
