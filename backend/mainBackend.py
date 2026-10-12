@@ -633,6 +633,9 @@ class Job:
         self.started: float | None = None     # เวลาที่เริ่มประมวลผลจริง (ออกจากคิว)
         self.progress: int | None = None      # 0–100 จาก Forge (เฉพาะ generate) ไม่มี = None
         self.eta_sec: float | None = None     # เวลาที่เหลือที่ Forge ประเมิน
+        self.created: float = time.time()     # เวลาที่ส่งคำขอเข้ามา (เริ่มรอคิว)
+        self.ip: str = "-"
+        self.opts: dict = {}                  # ตัวเลือกที่ผู้ใช้ส่งมา (ไม่มีไฟล์ภาพ) ให้เจ้าหน้าที่ดู
 
 JOBS: dict[str, Job] = {}
 _cond = asyncio.Condition()
@@ -673,6 +676,7 @@ def _admit(u: dict, name: str):
 
 def _start(j: "Job", ai_path: str, body: bytes, ctype: str, ip: str, opts: dict):
     lane = LANES[j.lane]
+    j.ip, j.opts = ip, (opts if isinstance(opts, dict) else {})
     lane.queue.append(j.id)
     j.task = asyncio.create_task(_run_job(j, ai_path, body, ctype, ip))
     j.task.add_done_callback(_task_done(j))
@@ -931,6 +935,69 @@ def staff_only(u: dict = Depends(me_user)) -> dict:
     if u["role"] != "staff":
         raise HTTPException(403, "ต้องเป็นเจ้าหน้าที่เท่านั้น")
     return u
+
+
+# ---------- แดชบอร์ดเจ้าหน้าที่: ใครกำลังทำงานอะไร ----------
+def _iso(t: float | None) -> str | None:
+    return datetime.fromtimestamp(t, timezone.utc).isoformat() if t else None
+
+def _user_names(emails: set[str]) -> dict[str, str]:
+    if not emails:
+        return {}
+    conn = sqlite3.connect(DB)
+    try:
+        q = ",".join("?" * len(emails))
+        rows = conn.execute(f"SELECT email, name FROM users WHERE email IN ({q})", tuple(emails))
+        return dict(rows.fetchall())
+    finally:
+        conn.close()
+
+def _admin_job(j: Job, names: dict, now: float) -> dict:
+    s = _snapshot(j)
+    s.pop("job_id", None)
+    end = j.finished or now
+    d = {
+        "job_id": j.id, **s,
+        "tool": j.name,
+        "user": {"email": j.owner, "name": names.get(j.owner) or j.owner},
+        "ip": j.ip,
+        "created_at": _iso(j.created),
+        "started_at": _iso(j.started),
+        "finished_at": _iso(j.finished),
+        # เวลารอคิว / เวลาประมวลผล (วินาที)
+        "wait_sec": round((j.started or end) - j.created, 1),
+        "run_sec": round(end - j.started, 1) if j.started else None,
+        "options": {k: str(v)[:120] for k, v in list(j.opts.items())[:12] if v not in (None, "")},
+    }
+    if j.status == "running" and j.name in DURATIONS:
+        d["avg_sec"] = round(_avg(j.name), 1)
+    return d
+
+@app.get("/api/v1/admin/jobs")
+async def admin_jobs(_: dict = Depends(staff_only)):
+    """งานที่กำลังรัน/รอคิวอยู่ตอนนี้ (เรียงตามคิว) + งานที่จบไปแล้วใน JOB_TTL ล่าสุด (ใหม่สุดก่อน)"""
+    now = time.time()
+    active_ids = list(_active_job_ids())
+    active = [JOBS[i] for i in active_ids if i in JOBS]
+    recent = sorted((j for j in JOBS.values() if j.id not in active_ids and j.finished),
+                    key=lambda j: j.finished, reverse=True)
+    names = _user_names({j.owner for j in active + recent})
+    return {
+        "now": _iso(now),
+        "lanes": {
+            name: {
+                "concurrency": l.concurrency,
+                "max_waiting": l.max_waiting,
+                "running": sum(1 for i in l.queue if i in JOBS and JOBS[i].status == "running"),
+                "waiting": sum(1 for i in l.queue if i in JOBS and JOBS[i].status == "queued"),
+            }
+            for name, l in LANES.items()
+        },
+        "active": [_admin_job(j, names, now) for j in active],
+        "recent": [_admin_job(j, names, now) for j in recent[:50]],
+        "avg_sec": {k: round(_avg(k), 1) for k in DURATIONS},
+        "recent_ttl_sec": JOB_TTL,
+    }
 
 
 @app.get("/api/v1/admin/users")

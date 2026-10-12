@@ -28,7 +28,9 @@ async function call(path, { method = "GET", body } = {}) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         // รองรับทั้ง err() ของเรา และ HTTPException ของ FastAPI
-        throw new Error(data?.error?.message || data?.detail || `HTTP ${res.status}`);
+        const e = new Error(data?.error?.message || data?.detail || `HTTP ${res.status}`);
+        e.status = res.status;
+        throw e;
     }
     return data;
 }
@@ -46,6 +48,8 @@ function render() {
     const signedIn = !!me;
     $("viewLogin").hidden = signedIn;
     $("viewConsole").hidden = !signedIn;
+    $("viewJobs").hidden = !signedIn;
+    signedIn ? startJobs() : stopJobs();
     $("btnLogout").hidden = !signedIn;
     $("whoami").textContent = signedIn ? `${me.name} (${me.email})` : "";
 }
@@ -142,6 +146,145 @@ function signOut() {
 }
 
 $("btnLogout").addEventListener("click", signOut);
+
+/* =============================================================
+   แดชบอร์ดงาน — ใครกำลังทำงานอะไร  (GET /api/v1/admin/jobs)
+   ============================================================= */
+const JOBS_POLL_MS = 2000;
+const TOOL_NAME = {
+    "generate": "สร้างภาพ",
+    "remove-background": "ลบพื้นหลัง",
+    "adjust": "ปรับแสงสี",
+    "filter": "ฟิลเตอร์",
+    "blur": "เบลอ",
+};
+const LANE_NAME = { gen: "สายสร้างภาพ (gen)", img: "สายแต่งภาพ (img)" };
+const STATUS_NAME = {
+    running: "กำลังทำ", queued: "รอคิว", done: "สำเร็จ", error: "ผิดพลาด", cancelled: "ยกเลิก",
+};
+let jobsTimer = null;
+let jobsBusy = false;
+
+const secText = (s) => {
+    if (s == null) return "-";
+    if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)} วิ`;
+    return `${Math.floor(s / 60)} นาที ${Math.round(s % 60)} วิ`;
+};
+
+const fmtTime = (iso) => {
+    const d = new Date(iso);
+    return isNaN(d) ? "-" : d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+};
+
+// % ที่จะแสดง: ของจริงจาก Forge ถ้ามี ไม่งั้นประมาณจากเวลาเฉลี่ย (แสดงเป็นสีจาง)
+function progressOf(j) {
+    if (typeof j.progress === "number") return { pct: j.progress, est: false };
+    if (j.status === "running" && j.avg_sec > 0 && j.run_sec != null) {
+        return { pct: Math.min(99, Math.round(j.run_sec / j.avg_sec * 100)), est: true };
+    }
+    return null;
+}
+
+function statusCell(j) {
+    let html = `<span class="badge ${esc(j.status)}">${esc(STATUS_NAME[j.status] || j.status)}</span>`;
+    if (j.status === "queued" && j.position) {
+        html += ` <span class="muted">คิวที่ ${j.position}${j.total ? ` จาก ${j.total}` : ""}</span>`;
+    }
+    const p = progressOf(j);
+    if (j.status === "running" && p) {
+        const eta = typeof j.eta_sec === "number" ? ` · เหลือ ~${secText(j.eta_sec)}` : "";
+        html += ` <span class="num">${p.est ? "~" : ""}${p.pct}%${eta}</span>
+            <div class="pbar ${p.est ? "est" : ""}"><span style="width:${p.pct}%"></span></div>`;
+    }
+    if (j.error) html += `<div class="muted">${esc(j.error.code)}: ${esc(j.error.message)}</div>`;
+    return html;
+}
+
+const userCell = (j) =>
+    `<td class="who"><b>${esc(j.user?.name)}</b><span class="muted">${esc(j.user?.email)}</span>
+        ${j.ip && j.ip !== "-" ? `<div class="muted">IP ${esc(j.ip)}</div>` : ""}</td>`;
+
+const toolCell = (j) =>
+    `<td class="tool">${esc(TOOL_NAME[j.tool] || j.tool)}<span class="lane-tag">${esc(j.lane)}</span></td>`;
+
+const optsText = (o = {}) =>
+    Object.entries(o).map(([k, v]) => `${k}: ${v}`).join(" · ") || "-";
+
+function renderLanes(lanes = {}) {
+    $("laneTiles").innerHTML = Object.entries(lanes).map(([name, l]) => {
+        const cls = l.waiting >= l.max_waiting ? "full" : (l.running || l.waiting) ? "busy" : "";
+        return `<div class="tile ${cls}">
+            <div class="tile-title">${esc(LANE_NAME[name] || name)}</div>
+            <div class="tile-nums">
+                <div><b>${l.running}/${l.concurrency}</b><small>กำลังทำ</small></div>
+                <div><b>${l.waiting}/${l.max_waiting}</b><small>รอคิว</small></div>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+async function loadJobs() {
+    if (jobsBusy || !me) return;
+    jobsBusy = true;
+    try {
+        const d = await call("/api/v1/admin/jobs");
+        renderLanes(d.lanes);
+
+        $("jobsEmpty").hidden = d.active.length > 0;
+        $("jobRows").innerHTML = d.active.map((j) => `
+            <tr>
+                ${userCell(j)}
+                ${toolCell(j)}
+                <td>${statusCell(j)}</td>
+                <td class="num">${secText(j.wait_sec)}</td>
+                <td class="num">${j.run_sec == null ? "-" : secText(j.run_sec)}</td>
+                <td class="opts">${esc(optsText(j.options))}</td>
+            </tr>`).join("");
+
+        $("recentCount").textContent = d.recent.length;
+        $("recentMin").textContent = Math.round((d.recent_ttl_sec || 600) / 60);
+        $("recentRows").innerHTML = d.recent.map((j) => `
+            <tr>
+                ${userCell(j)}
+                ${toolCell(j)}
+                <td>${statusCell(j)}</td>
+                <td class="num">${secText(j.wait_sec)}</td>
+                <td class="num">${j.run_sec == null ? "-" : secText(j.run_sec)}</td>
+                <td class="num muted">${fmtTime(j.finished_at)}</td>
+            </tr>`).join("");
+
+        $("jobsUpdated").textContent = "อัปเดต " + fmtTime(d.now);
+        $("jobsLive").className = "live" + ($("autoRefresh").checked ? " on" : "");
+    } catch (e) {
+        $("jobsLive").className = "live err";
+        if (e.status === 401) return signOut();
+        $("jobsUpdated").textContent = "โหลดไม่สำเร็จ: " + e.message;
+    } finally {
+        jobsBusy = false;
+    }
+}
+
+function startJobs() {
+    if (!jobsTimer) {
+        loadJobs();
+        jobsTimer = setInterval(() => {
+            // ไม่ถามถ้าปิดอัปเดตอัตโนมัติ หรือแท็บถูกซ่อนอยู่
+            if ($("autoRefresh").checked && !document.hidden) loadJobs();
+        }, JOBS_POLL_MS);
+    }
+}
+
+function stopJobs() {
+    clearInterval(jobsTimer);
+    jobsTimer = null;
+}
+
+$("btnJobsReload").addEventListener("click", loadJobs);
+$("autoRefresh").addEventListener("change", () => {
+    $("jobsLive").className = "live" + ($("autoRefresh").checked ? " on" : "");
+    if ($("autoRefresh").checked) loadJobs();
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden && me) loadJobs(); });
 $("btnReload").addEventListener("click", loadUsers);
 
 /* ---------- ตอนเปิดหน้า: มี token ค้างอยู่ไหม ---------- */
@@ -154,4 +297,4 @@ $("btnReload").addEventListener("click", loadUsers);
         setToken("");
     }
     render();
-})();
+})();
