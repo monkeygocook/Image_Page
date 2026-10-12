@@ -34,7 +34,57 @@
             </form>
         </section>
 
-        <!-- หน้าจอที่ 2: ตารางผู้ใช้ -->
+        <!-- หน้าจอที่ 2: แดชบอร์ดงาน — ใครกำลังทำอะไร (ดึงจาก /api/v1/admin/jobs) -->
+        <section id="viewJobs" class="card" hidden>
+            <div class="row-between">
+                <h2>งานที่กำลังทำ <span id="jobsLive" class="live" title="อัปเดตอัตโนมัติ"></span></h2>
+                <div class="row-gap">
+                    <span id="jobsUpdated" class="muted"></span>
+                    <label class="inline"><input id="autoRefresh" type="checkbox" checked> อัปเดตอัตโนมัติ</label>
+                    <button id="btnJobsReload" class="btn btn-ghost">รีเฟรช</button>
+                </div>
+            </div>
+
+            <div id="laneTiles" class="tiles"></div>
+
+            <div class="table-wrap">
+                <table class="jobs">
+                    <thead>
+                        <tr>
+                            <th>ผู้ใช้</th>
+                            <th>เครื่องมือ</th>
+                            <th>สถานะ</th>
+                            <th>รอคิว</th>
+                            <th>ประมวลผล</th>
+                            <th>รายละเอียด</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobRows"></tbody>
+                </table>
+            </div>
+            <p id="jobsEmpty" class="muted empty" hidden>ตอนนี้ไม่มีใครใช้งานอยู่</p>
+
+            <details id="recentBox" class="recent">
+                <summary>งานที่จบแล้ว ใน <span id="recentMin">10</span> นาทีล่าสุด (<span id="recentCount">0</span>)</summary>
+                <div class="table-wrap">
+                    <table class="jobs">
+                        <thead>
+                            <tr>
+                                <th>ผู้ใช้</th>
+                                <th>เครื่องมือ</th>
+                                <th>ผล</th>
+                                <th>รอคิว</th>
+                                <th>ประมวลผล</th>
+                                <th>จบเมื่อ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentRows"></tbody>
+                    </table>
+                </div>
+            </details>
+        </section>
+
+        <!-- หน้าจอที่ 3: ตารางผู้ใช้ -->
         <section id="viewConsole" class="card" hidden>
             <div class="row-between">
                 <h2>จัดการผู้ใช้ (<span id="userCount">0</span>)</h2>
@@ -63,4 +113,4 @@
     <script src="js/admin.js" defer></script>
 </body>
 
-</html>
+</html>
