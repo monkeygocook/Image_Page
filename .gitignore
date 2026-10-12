@@ -15,6 +15,8 @@ venv/
 .DS_Store
 Thumbs.db
 *.log
+backend/auth.py
+backend/database.py
 
 # ภาพผลลัพธ์ที่ AI server เก็บไว้ดูผล
 AI_server/outputs/
