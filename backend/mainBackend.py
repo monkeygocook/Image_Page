@@ -630,6 +630,9 @@ class Job:
         self.err_msg: str | None = None
         self.finished: float | None = None
         self.task: asyncio.Task | None = None
+        self.started: float | None = None     # เวลาที่เริ่มประมวลผลจริง (ออกจากคิว)
+        self.progress: int | None = None      # 0–100 จาก Forge (เฉพาะ generate) ไม่มี = None
+        self.eta_sec: float | None = None     # เวลาที่เหลือที่ Forge ประเมิน
 
 JOBS: dict[str, Job] = {}
 _cond = asyncio.Condition()
@@ -699,9 +702,53 @@ def _snapshot(j: Job) -> dict:
         s["position"] = ahead - lane.concurrency + 1    # 1 = คิวถัดไป
         s["ahead"] = ahead
         s["total"] = len(lane.queue)
+    if j.status == "running":
+        s.update(_progress_info(j, elapsed=False))
+    if j.status == "done":
+        s["progress"] = 100
     if j.status == "error":
         s["error"] = {"code": j.err_code, "message": j.err_msg}
     return s
+
+def _progress_info(j: "Job", elapsed: bool = True) -> dict:
+    """ข้อมูลสำหรับแถบเปอร์เซ็นต์
+    - progress : % จริงจาก Forge (มีเฉพาะ generate ที่ Forge ตอบได้)
+    - eta_sec  : เวลาที่เหลือที่ Forge ประเมิน
+    - elapsed_sec / avg_sec : ให้หน้าเว็บประมาณ % เองเมื่อไม่มี progress จริง
+    elapsed=False สำหรับ SSE: ค่าที่เปลี่ยนทุกเสี้ยววินาทีจะทำให้ SSE ส่งซ้ำไม่หยุด
+    (หน้าเว็บนับเวลาเองจากตอนได้สถานะ running ซึ่งส่งทันทีที่เริ่ม)
+    """
+    info: dict = {}
+    if j.name in DURATIONS:                     # มีสถิติจริงแล้วเท่านั้น (ไม่ส่งค่าเดา 10 วิ)
+        info["avg_sec"] = round(_avg(j.name), 1)
+    if elapsed and j.started is not None:
+        info["elapsed_sec"] = round(time.time() - j.started, 1)
+    if j.progress is not None:
+        info["progress"] = j.progress
+    if j.eta_sec is not None:
+        info["eta_sec"] = j.eta_sec
+    return info
+
+PROGRESS_POLL_SEC = 1.0
+
+async def _poll_progress(j: "Job"):
+    """ระหว่างที่ generate กำลังรัน ถาม AI ทุก 1 วินาทีว่า Forge วาดไปกี่ % แล้ว"""
+    while True:
+        await asyncio.sleep(PROGRESS_POLL_SEC)
+        try:
+            r = await _ai_client.get("/generate/progress", timeout=3)
+            d = r.json() if r.status_code == 200 else {}
+        except Exception:
+            continue                                    # อ่านไม่ได้รอบนี้ ข้ามไป
+        p = d.get("progress")
+        if p is None or not d.get("active", True):
+            continue
+        pct = max(j.progress or 0, min(99, int(p * 100)))   # ไม่ถอยหลัง, 100 ไว้ตอนเสร็จจริง
+        eta = d.get("eta_sec")
+        eta = round(float(eta), 1) if isinstance(eta, (int, float)) and eta >= 0 else None
+        if pct != j.progress or eta != j.eta_sec:
+            j.progress, j.eta_sec = pct, eta
+            await _notify()
 
 def _get_job(job_id: str, u: dict) -> Job:
     j = JOBS.get(job_id)
@@ -721,10 +768,15 @@ async def _run_job(
     try:
         async with lane.slots:
             j.status = "running"
-            t1 = time.time()
+            t1 = j.started = time.time()
             log.info("JOB START %s lane=%s user=%s ip=%s", j.name, j.lane, j.owner, ip)
             await _notify()
-            r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
+            poller = asyncio.create_task(_poll_progress(j)) if j.name == "generate" else None
+            try:
+                r = await _ai_client.post(ai_path, content=body, headers={"content-type": ctype})
+            finally:
+                if poller:
+                    poller.cancel()
         if r.status_code != 200:
             log.error("JOB FAIL %s user=%s -> AI HTTP %s | %s", j.name, j.owner, r.status_code, r.text[:300])
             j.err_code, j.err_msg = _ai_error(j.name, r.status_code)
@@ -799,6 +851,10 @@ async def queue_state(request_id: str, u: dict = Depends(me_user)):
         s["total"] = len(lane.queue)
     if j.name in DURATIONS:
         s["avg_process_sec"] = round(_avg(j.name), 1)
+    if j.status == "running":
+        s.update(_progress_info(j))
+    elif j.status == "done":
+        s["progress"] = 100
     return s
 
 
@@ -1039,4 +1095,4 @@ async def seed_staff():
 
         print(f"[seed] staff = {email}")
 
-    conn.close()
+    conn.close()

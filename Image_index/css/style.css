@@ -1149,16 +1149,19 @@ select:focus {
 .eta-btn-label {
     position: relative;
     z-index: 1;
+    font-variant-numeric: tabular-nums;
 }
 
 .eta-btn-bar {
     position: absolute;
     left: 0;
+    top: 0;
     bottom: 0;
-    height: 4px;
     width: 0;
-    background: rgba(255, 255, 255, .85);
+    background: rgba(255, 255, 255, .28);
+    border-right: 3px solid rgba(255, 255, 255, .9);
     transition: width .25s linear;
+    pointer-events: none;
 }
 
 /* ---------- ช่วงรอคิว: แถบวิ่งไปมา ---------- */
@@ -1176,4 +1179,4 @@ select:focus {
     to {
         left: 100%;
     }
-}
+}

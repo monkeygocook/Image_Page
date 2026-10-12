@@ -94,3 +94,32 @@ def generate_image(
         raise RuntimeError(
             "ระบบสร้างภาพเกิดข้อผิดพลาด กรุณาลองใหม่"
         ) from exc
+
+def get_progress() -> dict:
+    """ความคืบหน้าของงานที่ Forge กำลังวาดอยู่ (ใช้แสดงแถบเปอร์เซ็นต์บนหน้าเว็บ)
+
+    Forge มี GET /sdapi/v1/progress บอก progress 0.0–1.0 และเวลาที่เหลือโดยประมาณ (eta_relative)
+    สาย gen รันทีละงาน ค่าที่ได้จึงเป็นของงานที่กำลังทำอยู่
+    เรียกไม่สำเร็จ -> progress = None (หน้าเว็บจะใช้การประมาณจากเวลาแทน)
+    """
+    try:
+        r = requests.get(
+            f"{FORGE_URL}/sdapi/v1/progress",
+            params={"skip_current_image": "true"},   # ไม่ต้องส่งภาพตัวอย่างกลับมา (เบา)
+            timeout=3,
+        )
+        r.raise_for_status()
+        d = r.json()
+    except Exception as exc:
+        log.debug("อ่าน progress จาก Forge ไม่ได้: %s", exc)
+        return {"progress": None}
+
+    state = d.get("state") or {}
+    progress = float(d.get("progress") or 0.0)
+    return {
+        "progress": max(0.0, min(1.0, progress)),
+        "eta_sec": d.get("eta_relative"),
+        "step": state.get("sampling_step"),
+        "steps": state.get("sampling_steps"),
+        "active": progress > 0 or bool(state.get("job_count")),
+    }

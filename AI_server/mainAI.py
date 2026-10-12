@@ -4,7 +4,7 @@ from typing import Optional
 
 import patch
 from fastapi.concurrency import run_in_threadpool
-from services.generator import DEFAULT_SIZE, IMAGE_SIZES, LORAS, generate_image
+from services.generator import DEFAULT_SIZE, IMAGE_SIZES, LORAS, generate_image, get_progress
 from pydantic import BaseModel
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -69,6 +69,12 @@ BLUR_HANDLERS = {
     "background": background_blur,
     "face": face_blur,
 }
+
+
+@app.get("/generate/progress")
+async def generate_progress():
+    """ความคืบหน้าของการสร้างภาพที่กำลังทำอยู่ — ไม่ผ่านคิว (เบามาก)"""
+    return await run_in_threadpool(get_progress)
 
 
 @app.get("/health")

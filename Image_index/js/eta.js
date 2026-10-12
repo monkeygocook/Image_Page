@@ -1,26 +1,23 @@
 /* =============================================================
-   eta.js — แถบคิว + เวลาที่เหลือ บนปุ่มสีส้ม (#submitBtn)
-   ช่วงที่ 1 รอคิว   : ลำดับคิวจาก backend (GET /api/v1/queue/{id})
-   ช่วงที่ 2 ประมวลผล : เวลาที่เหลือ ประมาณจากเวลาประมวลผลจริง
+   eta.js — แถบเปอร์เซ็นต์ความคืบหน้า บนปุ่มสีส้ม (#submitBtn)
+
+   ข้อมูลมาจากสถานะงานที่ backend ส่งผ่าน SSE (/api/v1/jobs/{id}/events)
+     queued  : position / total            → "คิวที่ 2 จาก 3" + แถบวิ่ง
+     running : progress (0–100) / eta_sec  → % จริงจาก Forge (เฉพาะสร้างภาพ)
+               elapsed_sec / avg_sec       → % ประมาณจากเวลา (งานแต่งภาพ
+                                             หรือเมื่อ Forge ไม่ตอบ)
+     done    : progress = 100
    ============================================================= */
 
 const Eta = (() => {
-    // เปลี่ยนเป็น true เมื่อปั้นเปิด endpoint คิวแล้ว
-    const QUEUE_ENABLED = false;
-
     const KEY = "eta:actual_durations";
     const KEEP = 5;
     const MAX_SEC = 330;                 // ตรงกับ PROCESS_TIMEOUT
     const TICK_MS = 250;
-    const POLL_MS = 1000;                // ถามคิวทุก 1 วินาที
-    const MAX_MISS = 3;                  // ถามแล้วไม่ได้ข้อมูลเลย 3 ครั้ง = ข้ามไปแสดงเวลาแทน
-    const QUEUE_URL = (id) => `/api/v1/queue/${encodeURIComponent(id)}`;
     const DEFAULTS = { genimage: 90, back: 15, icon: 5, tone: 5, blur: 8 };
     const FALLBACK = 15;
 
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-    /* ---------- สถิติเวลาประมวลผลจริง (ไม่รวมเวลารอคิว) ---------- */
+    /* ---------- สถิติเวลาประมวลผลจริงในเครื่องนี้ (สำรอง ถ้า backend ยังไม่มีสถิติ) ---------- */
     const load = () => {
         try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
         catch { return {}; }
@@ -40,136 +37,155 @@ const Eta = (() => {
         try { localStorage.setItem(KEY, JSON.stringify(all)); } catch { }
     }
 
-    /* ---------- รหัสคำขอ (ใช้ผูกคำขอกับข้อมูลคิว) ---------- */
-    function newId() {
-        // randomUUID ใช้ไม่ได้ถ้าเปิดผ่าน http ด้วย IP ในวง LAN จึงต้องมีทางสำรอง
-        return globalThis.crypto?.randomUUID?.()
-            || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+    /* ---------- ข้อความ (ใช้ t() ของ script.js ถ้ามี) ---------- */
+    const FALLBACK_TEXT = {
+        "eta.sending": "กำลังส่ง...",
+        "eta.queue": "คิวที่ {n} จาก {total} · รอมา {time}",
+        "eta.leftMin": "เหลือ ~{n} นาที",
+        "eta.leftSec": "เหลือ ~{n} วิ",
+        "eta.almost": "ใกล้เสร็จแล้ว...",
+        "eta.slow": "นานกว่าปกติ...",
+    };
+    function tr(k, vars = {}) {
+        const s = typeof t === "function" ? t(k, vars) : null;
+        if (s && s !== k) return s;
+        return FALLBACK_TEXT[k].replace(/\{(\w+)\}/g, (_, v) => vars[v] ?? "");
     }
 
-    // ⚠️ ต้องตรงกับที่ api.js เก็บ token ไว้ (ดู FE-79)
-    function authHeader() {
-        const t = localStorage.getItem("token");
-        return t ? { Authorization: "Bearer " + t } : {};
-    }
-
-    async function fetchQueue(id) {
-        try {
-            const res = await fetch(QUEUE_URL(id), { headers: authHeader(), cache: "no-store" });
-            return res.ok ? await res.json() : null;
-        } catch { return null; }
-    }
-
-    /* ---------- ข้อความ ---------- */
     const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-    function message(remain) {
-        if (remain >= 90) return `เหลือ ~${Math.ceil(remain / 60)} นาที`;
-        if (remain >= 1) return `เหลือ ~${Math.ceil(remain)} วิ`;
-        if (remain > -3) return "ใกล้เสร็จแล้ว...";
-        return "ใช้เวลานานกว่าปกติ...";
+    function remainText(remain) {
+        if (remain == null) return "";
+        if (remain >= 90) return tr("eta.leftMin", { n: Math.ceil(remain / 60) });
+        if (remain >= 1) return tr("eta.leftSec", { n: Math.ceil(remain) });
+        if (remain > -3) return tr("eta.almost");
+        return tr("eta.slow");
     }
 
+    // % ประมาณจากเวลา: วิ่งตามจริงถึง 90% แล้วค่อย ๆ ชะลอ ไม่เกิน 99% จนกว่างานจะเสร็จ
     function percent(elapsed, est) {
         const r = elapsed / est;
         const p = r < 0.9 ? r * 100 : 90 + 9 * (1 - Math.exp(-(r - 0.9) * 4));
         return Math.min(p, 99);
     }
 
-    /* ---------- ครอบงาน 1 ครั้ง ---------- */
-    async function track(tab, run, requestId) {
+    /* ---------- ครอบงาน 1 ครั้ง ----------
+       run(onStatus) ต้องเรียก onStatus(สถานะจาก backend) ทุกครั้งที่สถานะเปลี่ยน */
+    async function track(tab, run) {
         const btn = document.getElementById("submitBtn");
-        if (!btn) { console.warn("[eta] ไม่พบปุ่ม #submitBtn"); return run(); }
+        if (!btn) { console.warn("[eta] ไม่พบปุ่ม #submitBtn"); return run(() => { }); }
 
         const saved = btn.innerHTML;
         const t0 = performance.now();
-        let est = getEstimate(tab);
-        let phase = QUEUE_ENABLED && requestId ? "queue" : "work";
-        let tWork = t0;                  // เวลาที่เริ่มประมวลผลจริง
-        let queue = null;
-        let finished = false;
+        const st = {
+            phase: "send",               // send → queue → work → done
+            position: 0, total: 0,
+            est: getEstimate(tab),       // วินาทีที่คาดว่าจะใช้ประมวลผล
+            workStart: t0,
+            real: null,                  // % จริงจาก Forge (null = ยังไม่มี)
+            realEta: null, realAt: 0,
+            shown: 0,                    // % ที่แสดงอยู่ (กันแถบถอยหลัง)
+        };
 
         btn.classList.add("eta-running");
-        btn.classList.toggle("eta-queued", phase === "queue");
-        btn.innerHTML = '<span class="eta-btn-label"></span><span class="eta-btn-bar"></span>';
+        btn.innerHTML = '<span class="eta-btn-bar"></span><span class="eta-btn-label"></span>';
         const label = btn.querySelector(".eta-btn-label");
         const bar = btn.querySelector(".eta-btn-bar");
 
-        function startWork(serverAvg, from = performance.now()) {
-            phase = "work";
-            tWork = from;
-            if (serverAvg > 0) est = serverAvg;    // ค่าเฉลี่ยจากเซิร์ฟเวอร์แม่นกว่า ใช้ก่อน
-            btn.classList.remove("eta-queued");
-            bar.style.width = "0";
+        function onStatus(s) {
+            if (!s || !s.status) return;
+            const now = performance.now();
+            if (s.status === "queued") {
+                st.phase = "queue";
+                st.position = s.position || 0;
+                st.total = s.total || 0;
+            } else if (s.status === "running") {
+                if (st.phase !== "work") {
+                    st.phase = "work";
+                    st.workStart = now - (Number(s.elapsed_sec) || 0) * 1000;
+                    st.shown = 0;
+                }
+                if (Number(s.avg_sec) > 0) st.est = Number(s.avg_sec);   // สถิติของเซิร์ฟเวอร์แม่นกว่า
+                if (typeof s.progress === "number") {
+                    // ครั้งแรกที่ได้ % จริง ให้แทนค่าประมาณเลย (อาจลดลงได้ 1 ครั้ง)
+                    if (st.real == null) st.shown = 0;
+                    st.real = s.progress;
+                    st.realEta = typeof s.eta_sec === "number" ? s.eta_sec : null;
+                    st.realAt = now;
+                }
+            } else if (s.status === "done") {
+                st.phase = "done";
+            }
+            tick();
         }
 
-        const tick = () => {
+        function tick() {
             const now = performance.now();
-            if (phase === "queue") {
-                const waited = clock((now - t0) / 1000);
-                label.textContent = queue?.position > 0
-                    ? `อยู่คิวที่ ${queue.position}${queue.total ? ` จาก ${queue.total}` : ""} · รอมาแล้ว ${waited}`
-                    : `กำลังเข้าคิว... · ${waited}`;
+            btn.classList.toggle("eta-queued", st.phase === "queue" || st.phase === "send");
+
+            if (st.phase === "send") {
+                label.textContent = tr("eta.sending");
                 return;
             }
-            const s = (now - tWork) / 1000;
-            label.textContent = `${message(est - s)} · ${clock(s)}`;
-            bar.style.width = percent(s, est).toFixed(1) + "%";
-        };
-
-        async function watchQueue() {
-            let misses = 0;
-            while (!finished && phase === "queue") {
-                const info = await fetchQueue(requestId);
-                if (finished) return;
-                if (!info) {
-                    // ยังไม่เคยได้ข้อมูลคิวเลย: ข้ามไปแสดงเวลา โดยนับจากตอนกดปุ่ม
-                    if (!queue && ++misses >= MAX_MISS) { startWork(0, t0); return; }
-                } else if (info.state === "queued") {
-                    queue = info;
-                } else if (info.state === "processing") {
-                    startWork(Number(info.avg_process_sec)); return;
-                } else {
-                    return;                             // done / failed: รอผลจากคำขอหลัก
-                }
-                tick();
-                await sleep(POLL_MS);
+            if (st.phase === "queue") {
+                label.textContent = tr("eta.queue", {
+                    n: st.position, total: st.total || st.position, time: clock((now - t0) / 1000),
+                });
+                return;
             }
+
+            let pct, remain;
+            if (st.phase === "done") {
+                pct = 100; remain = null;
+            } else {
+                const elapsed = (now - st.workStart) / 1000;
+                if (st.real != null) {
+                    pct = st.real;
+                    remain = st.realEta != null ? st.realEta - (now - st.realAt) / 1000 : null;
+                } else {
+                    pct = percent(elapsed, st.est);
+                    remain = st.est - elapsed;
+                }
+            }
+            st.shown = Math.max(st.shown, pct);
+            const p = Math.floor(st.shown);
+            const r = remainText(remain);
+            label.textContent = r ? `${p}% · ${r}` : `${p}%`;
+            bar.style.width = st.shown.toFixed(1) + "%";
         }
 
         tick();
         const loop = setInterval(tick, TICK_MS);
-        if (phase === "queue") watchQueue();
 
         try {
-            const out = await run();
-            // บันทึกเฉพาะเวลาที่รู้แน่ว่าเป็นช่วงประมวลผล
-            if (phase === "work") recordTime(tab, (performance.now() - tWork) / 1000);
+            const out = await run(onStatus);
+            if (st.phase === "work" || st.phase === "done") {
+                recordTime(tab, (performance.now() - st.workStart) / 1000);
+            }
             return out;
         } finally {
-            finished = true;
             clearInterval(loop);
             btn.classList.remove("eta-running", "eta-queued");
             if (btn.contains(label)) btn.innerHTML = saved;
         }
     }
 
-    return { track, newId, getEstimate };
+    return { track, getEstimate, percent };
 })();
 
-/* ---------- ครอบ Api.image.process ---------- */
+/* ---------- ครอบ Api.image.processJob ---------- */
 (() => {
-    if (typeof Api === "undefined" || typeof Api?.image?.process !== "function") {
-        console.warn("[eta] ไม่พบ Api.image.process — eta.js ต้องโหลดหลัง api.js");
+    if (typeof Api === "undefined" || typeof Api?.image?.processJob !== "function") {
+        console.warn("[eta] ไม่พบ Api.image.processJob — eta.js ต้องโหลดหลัง api.js");
         return;
     }
-    const original = Api.image.process;
-    Api.image.process = function (args = {}) {
-        const requestId = args.requestId || Eta.newId();
-        return Eta.track(
-            args.tab || "default",
-            () => original.call(this, { ...args, requestId }),
-            requestId
+    const original = Api.image.processJob;
+    Api.image.processJob = function (args = {}) {
+        return Eta.track(args.tab || "default", (etaStatus) =>
+            original.call(this, {
+                ...args,
+                onStatus: (s) => { etaStatus(s); args.onStatus?.(s); },
+            })
         );
     };
     console.info("[eta] พร้อมใช้งาน");
