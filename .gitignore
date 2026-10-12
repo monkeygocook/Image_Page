@@ -7,6 +7,8 @@ __pycache__/
 venv/
 .venv/
 .env
+backend/database.py
+backend/auth.py
 
 # ฐานข้อมูล (มีข้อมูลผู้ใช้ ไม่ควรขึ้น repo)
 *.db
