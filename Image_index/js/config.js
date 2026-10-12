@@ -268,7 +268,7 @@ const I18N = {
         "hint.reqId": " (request id: {id})",
 
         /* ---------- คิว ---------- */
-                "err.QUEUE_FULL": "Queue is full. Please try again later.",
+        "err.QUEUE_FULL": "Queue is full. Please try again later.",
         "err.JOB_ACTIVE": "You already have a job in progress.",
         "err.NOT_READY": "The job is not ready yet.",
         "job.queued": "You are #{n} in the queue",
@@ -374,6 +374,15 @@ const TAB_CONFIG = {
         hint: { th: "อธิบายภาพที่ต้องการให้ละเอียด", en: "Describe your image in detail" },
         returns: "image/png",
         fields: {
+            lora: {
+                kind: "enum", label: { th: "สไตล์ภาพ (LoRA)", en: "Style (LoRA)" }, default: "none",
+                values: [
+                    { v: "none", th: "ไม่ใช้", en: "None" },
+                    { v: "pixel_art", th: "Pixel Art", en: "Pixel Art" },
+                    { v: "linear_manga", th: "Linear Manga", en: "Linear Manga" },
+                    { v: "outline", th: "Outline", en: "Outline" },
+                ],
+            },
             size: {
                 kind: "enum", label: { th: "ขนาดภาพ", en: "Image size" }, default: "512x768",
                 values: [
