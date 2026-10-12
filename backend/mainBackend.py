@@ -1129,37 +1129,3 @@ async def admin_delete(
     conn.close()
 
     return Response(status_code=204)
-
-# ก่อนส่งงานจริงต้องลบบล็อกนี้ทิ้ง หรือเปลี่ยนรหัสผ่าน — ตอนนี้รหัสอยู่ในโค้ดแบบเปิดเผย และ repo เป็น Public อยู่
-@app.on_event("startup")
-async def seed_staff():
-
-    email = "staff@example.com"
-
-    conn = sqlite3.connect(DB)
-
-    row = conn.execute("""
-        SELECT email
-        FROM users
-        WHERE email = ?
-    """, (email,)).fetchone()
-
-    if not row:
-
-        conn.execute("""
-            INSERT INTO users
-            (email, name, pw, role, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            email,
-            "เจ้าหน้าที่ระบบ",
-            _hash("Staff1234"),
-            "staff",
-            datetime.now(timezone.utc).isoformat()
-        ))
-
-        conn.commit()
-
-        print(f"[seed] staff = {email}")
-
-    conn.close()
