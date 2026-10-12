@@ -13,6 +13,7 @@ from services.background import remove_background
 from services.blur import background_blur, face_blur, gaussian_blur
 from services.Filter import FILTERS, apply_filter
 from services.adjust import adjust_image
+from services.output_store import save_output
 
 app = FastAPI()
 
@@ -21,6 +22,13 @@ MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "1"))
 MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", "10"))
 _job_slots = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 _pending_jobs = 0
+
+
+def _run_and_save(func, *args, **kwargs):
+    result = func(*args, **kwargs)
+    if isinstance(result, (bytes, bytearray)):
+        save_output(getattr(func, "__name__", "job"), bytes(result))
+    return result
 
 
 async def run_queued(func, *args, **kwargs):
@@ -32,7 +40,7 @@ async def run_queued(func, *args, **kwargs):
     _pending_jobs += 1
     try:
         async with _job_slots:
-            return await run_in_threadpool(func, *args, **kwargs)
+            return await run_in_threadpool(_run_and_save, func, *args, **kwargs)
     finally:
         _pending_jobs -= 1
 
