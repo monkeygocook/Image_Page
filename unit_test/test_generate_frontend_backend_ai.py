@@ -112,13 +112,13 @@ def test_1_logged_in_user_gets_image(logged_in, ai_connected, forge):
 
 
 def test_1_empty_prompt_is_rejected_before_forge(logged_in, ai_connected, forge):
+    """prompt ว่าง → AI (mainAI.py) ปฏิเสธด้วย 422 ก่อนถึง Forge
+    backend ส่งต่อเป็น 502 พร้อมรหัส INVALID_PROMPT (หน้าเว็บแสดงข้อความตามรหัส)"""
     res = send_like_frontend(logged_in, prompt="   ", negative="")
 
-    assert res.status_code == 422, f"ได้ HTTP {res.status_code}"
-    assert res.json()["error"]["code"] == "INVALID_PROMPT", (
-        f"ได้รหัส {res.json()['error']['code']} — mainBackend.py ไม่ตรวจ prompt ว่างแล้ว "
-        f"และ AI ก็ไม่ตรวจ จึงส่ง prompt ว่างไปให้ Forge (Forge ถูกเรียก {len(forge['calls'])} ครั้ง)"
-    )
+    assert res.status_code == 502, f"ได้ HTTP {res.status_code}"
+    assert res.json()["error"]["code"] == "INVALID_PROMPT", f"ได้รหัส {res.json()['error']['code']}"
+    assert len(forge["calls"]) == 0, f"prompt ว่างหลุดไปถึง Forge ({len(forge['calls'])} ครั้ง)"
 
 
 # ======================================================================
@@ -148,7 +148,7 @@ def test_2_forge_off_gives_frontend_a_known_error(logged_in, ai_connected, forge
     res = send_like_frontend(logged_in)
     e = res.json()["error"]
 
-    assert res.status_code == 503
+    assert res.status_code == 502       # backend ส่ง error จาก AI ต่อเป็น 502 (Bad Gateway)
     assert e["code"] == "MODEL_UNAVAILABLE", (
         f"ได้รหัส {e['code']} ซึ่งหน้าเว็บไม่มีข้อความรองรับ "
         f"ผู้ใช้จะเห็นข้อความดิบ: {e['message'][:90]}"
@@ -182,7 +182,10 @@ def test_3_ai_returns_503_when_forge_is_off(ai_client, forge):
     res = ai_client.post("/generate", json={"prompt": "a cat"})
 
     assert res.status_code == 503
-    assert "Forge" in res.json()["detail"]
+    # ข้อความสำหรับผู้ใช้ไม่บอกชื่อ/ที่อยู่ภายในระบบ (รายละเอียดจริงอยู่ใน log ของเครื่อง AI)
+    detail = res.json()["detail"]
+    assert detail == "ระบบสร้างภาพยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง"
+    assert "http://" not in detail and "7860" not in detail
 
 
 def test_3_ai_returns_503_when_forge_errors(ai_client, forge):
@@ -190,7 +193,9 @@ def test_3_ai_returns_503_when_forge_errors(ai_client, forge):
     res = ai_client.post("/generate", json={"prompt": "a cat"})
 
     assert res.status_code == 503
-    assert "500" in res.json()["detail"]
+    detail = res.json()["detail"]
+    assert detail == "ระบบสร้างภาพเกิดข้อผิดพลาด กรุณาลองใหม่"
+    assert "CUDA" not in detail, "ข้อความ error ดิบจาก Forge หลุดไปถึงผู้ใช้"
 
 
 def test_3_ai_handles_forge_reply_without_image(ai_client, forge):

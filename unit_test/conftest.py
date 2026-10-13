@@ -41,6 +41,7 @@ TEST_PASSWORD = "Password123"
 def pytest_configure(config):
     config.addinivalue_line("markers", "live: ยิงไปที่ backend จริงผ่านเครือข่าย (ต้องตั้ง LIVE_BACKEND_URL)")
     config.addinivalue_line("markers", "model: โหลดโมเดล AI จริง ช้าและใช้แรมมาก (ข้ามได้ด้วย -m \"not model\")")
+    config.addinivalue_line("markers", "browser: เปิดหน้าเว็บจริงใน Chromium (ต้องติดตั้ง playwright)")
 
 
 def _refuse(request):
@@ -82,13 +83,16 @@ def logged_in(frontend):
 
 
 @pytest.fixture
-def ai_main():
+def ai_main(tmp_path, monkeypatch):
     """import AI_server/mainAI.py (ต้องมีไลบรารีของ AI ติดตั้งอยู่)"""
     for lib in ("rembg", "cv2", "numpy", "multipart"):
         pytest.importorskip(lib, reason=f"ยังไม่ได้ติดตั้ง {lib} (ดู AI_server/requirements.txt)")
     if str(AI_DIR) not in sys.path:
         sys.path.insert(0, str(AI_DIR))
     import mainAI
+    from services import output_store
+    # ภาพผลลัพธ์ระหว่างเทสไปลงโฟลเดอร์ชั่วคราว ไม่ปน AI_server/outputs ของจริง
+    monkeypatch.setattr(output_store, "OUTPUT_DIR", tmp_path / "ai_outputs")
     return mainAI
 
 
