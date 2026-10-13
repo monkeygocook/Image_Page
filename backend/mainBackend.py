@@ -17,6 +17,11 @@ import re
 from collections import deque
 from statistics import median
 
+from contextvars import ContextVar
+from contextlib import asynccontextmanager
+from database import get_connection, init_db
+from auth import (_hash, _token, _public, me_user, staff_only, AuthIn,)
+
 import os
 import httpx
 
@@ -33,50 +38,13 @@ logging.basicConfig(
     level=logging.INFO,format="%(asctime)s %(levelname)s %(name)s: %(message)s",)
 AI_URL = os.getenv("AI_URL", "http://26.84.90.188:8000").rstrip("/")  # <- ใส่ IP ของ AI
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
-app = FastAPI(title="Image_Page Fake Backend", version="1.0.0")
-
-DB = "Userdata.db"
-
-def init_db():
-    conn = sqlite3.connect(DB)
-    cur = conn.cursor()
-
-    # ตารางผู้ใช้
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            pw TEXT NOT NULL,
-            role TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    """)
-
-    # ตาราง Notes
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS notes (
-            email TEXT PRIMARY KEY,
-            content TEXT NOT NULL DEFAULT '',
-            FOREIGN KEY (email) REFERENCES users(email)
-        )
-    """)
-
-    # ตาราง Preferences
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS preferences (
-            email TEXT PRIMARY KEY,
-            lang TEXT NOT NULL DEFAULT 'th',
-            tabs TEXT,
-            FOREIGN KEY (email) REFERENCES users(email)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-init_db()
+app = FastAPI(title="Image_Page Fake Backend",version="1.0.0",lifespan=lifespan)
 
 HTTP_ERR_MAP = {
     400: ("VALIDATION_ERROR", "คำขอไม่ถูกต้อง"),
@@ -156,75 +124,11 @@ def err(code: str, message: str, http: int = 422):
 class GenerateRequest(BaseModel):
     prompt: str
     negative_prompt: str | None = None
-    
-SECRET = "dev-secret-change-me"
-
-def _hash(pw: str) -> str:
-    return hashlib.sha256((SECRET + pw).encode()).hexdigest()
-
-def _token(email: str) -> str:
-    raw = json.dumps({"sub": email, "exp": time.time() + 86400})
-    sig = hmac.new(SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()[:16]
-    return base64.urlsafe_b64encode(f"{raw}|{sig}".encode()).decode()
-
-def _public(u: dict) -> dict:
-    return {"name": u["name"], "email": u["email"],
-            "role": u["role"], "created_at": u["created_at"]}
-
-def me_user(authorization: str | None = Header(None)) -> dict:
-
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "กรุณาเข้าสู่ระบบ")
-
-    try:
-        raw, sig = base64.urlsafe_b64decode(
-            authorization[7:]
-        ).decode().rsplit("|", 1)
-
-        good = hmac.new(
-            SECRET.encode(),
-            raw.encode(),
-            hashlib.sha256
-        ).hexdigest()[:16]
-
-        data = json.loads(raw)
-
-        if not hmac.compare_digest(sig, good):
-            raise Exception()
-
-        if data["exp"] <= time.time():
-            raise Exception()
-
-        conn = sqlite3.connect(DB)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-
-        cur.execute(
-            "SELECT * FROM users WHERE email = ?",
-            (data["sub"],)
-        )
-
-        row = cur.fetchone()
-        conn.close()
-
-        if not row:
-            raise Exception()
-
-        return dict(row)
-
-    except Exception:
-        raise HTTPException(401, "เซสชันหมดอายุ")
-
-
-class AuthIn(BaseModel):
-    name: str | None = None
-    email: str
-    password: str
 
 @app.post("/api/v1/auth/register")
 async def register(b: AuthIn):
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
     cur = conn.cursor()
 
     cur.execute(
@@ -267,8 +171,7 @@ async def register(b: AuthIn):
 @app.post("/api/v1/auth/login")
 async def login(b: AuthIn):
 
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     cur = conn.cursor()
 
     cur.execute(
@@ -304,7 +207,7 @@ async def logout(u: dict = Depends(me_user)):
 @app.get("/api/v1/notes")
 async def get_notes(u: dict = Depends(me_user)):
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
 
     row = conn.execute(
         "SELECT content FROM notes WHERE email = ?",
@@ -326,7 +229,7 @@ async def put_notes(
 
     content = body.get("content", "")
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
 
     conn.execute("""
         INSERT INTO notes (email, content)
@@ -346,7 +249,7 @@ async def put_notes(
 @app.get("/api/v1/preferences")
 async def get_prefs(u: dict = Depends(me_user)):
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
 
     row = conn.execute("""
         SELECT lang, tabs
@@ -380,7 +283,7 @@ async def put_prefs(
     lang = body.get("lang", "th")
     tabs = body.get("tabs")
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
 
     conn.execute("""
         INSERT INTO preferences
@@ -570,14 +473,16 @@ def _make_ai_forwarder(name: str, ai_path: str):
 
         # Keep compatibility with existing frontend code that expects image bytes.
         # BE-20: ถ้าผู้ใช้ตัดการเชื่อมต่อ ให้ยกเลิกงาน (เอาออกจากคิว)
+        task = j.task
         try:
-            while not j.task.done():
+            while task is not None and not task.done():
                 if await request.is_disconnected():
-                    j.task.cancel()
+                    task.cancel()
                     break
-                await asyncio.wait({j.task}, timeout=1)
+                await asyncio.wait({task}, timeout=1)
         except asyncio.CancelledError:
-            j.task.cancel()
+            if task is not None:
+                task.cancel()
             raise
         if j.status == "done":
             return Response(content=j.result, media_type=j.media)
@@ -927,16 +832,6 @@ for _name, _ai_path in AI_ROUTES.items():
 
 
 
-
-
-
-
-def staff_only(u: dict = Depends(me_user)) -> dict:
-    if u["role"] != "staff":
-        raise HTTPException(403, "ต้องเป็นเจ้าหน้าที่เท่านั้น")
-    return u
-
-
 # ---------- แดชบอร์ดเจ้าหน้าที่: ใครกำลังทำงานอะไร ----------
 def _iso(t: float | None) -> str | None:
     return datetime.fromtimestamp(t, timezone.utc).isoformat() if t else None
@@ -944,7 +839,7 @@ def _iso(t: float | None) -> str | None:
 def _user_names(emails: set[str]) -> dict[str, str]:
     if not emails:
         return {}
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
     try:
         q = ",".join("?" * len(emails))
         rows = conn.execute(f"SELECT email, name FROM users WHERE email IN ({q})", tuple(emails))
@@ -980,7 +875,7 @@ async def admin_jobs(_: dict = Depends(staff_only)):
     active_ids = list(_active_job_ids())
     active = [JOBS[i] for i in active_ids if i in JOBS]
     recent = sorted((j for j in JOBS.values() if j.id not in active_ids and j.finished),
-                    key=lambda j: j.finished, reverse=True)
+                    key=lambda j: j.finished or 0.0, reverse=True)
     names = _user_names({j.owner for j in active + recent})
     return {
         "now": _iso(now),
@@ -1003,7 +898,7 @@ async def admin_jobs(_: dict = Depends(staff_only)):
 @app.get("/api/v1/admin/users")
 async def admin_list(_: dict = Depends(staff_only)):
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
 
     rows = conn.execute("""
@@ -1026,7 +921,7 @@ async def admin_set_role(
     me: dict = Depends(staff_only)
 ):
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
 
     row = conn.execute("""
@@ -1091,7 +986,7 @@ async def admin_delete(
             409
         )
 
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
 
     row = conn.execute("""
         SELECT email
