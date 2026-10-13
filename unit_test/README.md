@@ -36,3 +36,22 @@ pytest unit_test -m live -v
 | `test_register_frontend_backend.py` | test การสมัครบัญชีใหม่ |
 | `test_remove_background_frontend_backend_ai.py` | test ลบพื้นหลัง frontend → backend → AI |
 | `test_generate_frontend_backend_ai.py` | test สร้างภาพ frontend → backend → AI → Forge (จำลอง) |
+| `test_generate_options.py` | LoRA / ขนาดภาพ: ค่าใน config.js ตรงกับ AI, ไปถึง Forge จริง, ค่าผิดถูกปฏิเสธ |
+| `test_image_tools.py` | Adjust / Filter / Blur: ค่าจากหน้าเว็บถึง AI, AI ตรวจค่าผิด, ฟังก์ชันจริงให้ผลถูก |
+| `test_queue_lanes.py` | คิว 2 สาย (gen / img) |
+| `test_progress.py` | แถบ % ความคืบหน้า (Forge → AI → backend → SSE) |
+| `test_job_rules.py` | งานของใครของคนนั้น, 1 คน 1 งาน, ล้างงานเก่า (JOB_TTL) |
+| `test_auth_and_accounts.py` | ล็อกอิน / token, จัดการผู้ใช้ใน Staff Console, Notes / Preferences |
+| `test_admin_jobs.py` | แดชบอร์ดงานใน Staff Console |
+| `test_proxy_and_outputs.py` | proxy.py (ขนาดไฟล์, IP, error) และ output_store.py |
+| `test_frontend_browser.py` | เปิดหน้าเว็บจริงใน Chromium: สร้างภาพ + แถบ %, ยกเลิก, อัปโหลดรูป |
+
+## เทสหน้าเว็บในเบราว์เซอร์
+
+ต้องติดตั้ง Playwright ก่อน (ไม่มีจะข้ามเอง):
+
+```
+pip install playwright
+python -m playwright install chromium
+pytest unit_test -m browser -v
+```
