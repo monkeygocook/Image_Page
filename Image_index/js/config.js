@@ -102,7 +102,7 @@ const APP_PAGE = "index.html";      // หน้าผู้ใช้ทั่�
    ⚠️ โหมด mock เท่านั้น ระบบจริงต้องสร้างจากฝั่งหลังบ้าน (seed script / CLI) */
 const SEED_STAFF = {
     name: "Staff Admin",
-    email: "staff@local.dev",
+    email: "staff@gmail.com",
     password: "Staff1234",
     role: "staff",
 };
@@ -202,7 +202,7 @@ const I18N = {
         "auth.required": "🔒 กรุณาเข้าสู่ระบบก่อนใช้งาน",
         "auth.expired": "เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่",
         "auth.errFields": "กรอกข้อมูลให้ครบก่อนครับ",
-        "auth.errEmail": "รูปแบบอีเมลไม่ถูกต้อง",
+        "auth.errEmail": { th: "อีเมลต้องลงท้ายด้วย @gmail.com เท่านั้น", en: "Email must end with @gmail.com" },
         "auth.errShort": "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร",
         "auth.errWeak": "รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข",
         "auth.welcome": "ยินดีต้อนรับ {name}",

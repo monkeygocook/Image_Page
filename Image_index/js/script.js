@@ -534,7 +534,8 @@ $("authForm").addEventListener("submit", async (e) => {
     const err = (k) => ($("authErr").textContent = t(k));
 
     if (!email || !pass || (authMode === "register" && !name)) return err("auth.errFields");
-    if (!/^\S+@\S+\.\S+$/.test(email)) return err("auth.errEmail");
+    if (!/^[a-z0-9][a-z0-9.+]*@gmail\.com$/i.test(email)) return err("auth.errEmail");
+
 
     // ตรวจความแข็งแรงเฉพาะตอนสมัคร — บัญชีเก่าอาจตั้งไว้ก่อนกฎใหม่
     if (authMode === "register") {
