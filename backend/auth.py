@@ -16,7 +16,7 @@ def _hash(pw: str) -> str:
     return hashlib.sha256((SECRET + pw).encode()).hexdigest()
 
 def _token(email: str) -> str:
-    raw = json.dumps({"sub": email, "exp": time.time() + 86400})
+    raw = json.dumps({"sub": email, "exp": time.time() + 1209600})
     sig = hmac.new(SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()[:16]
     return base64.urlsafe_b64encode(f"{raw}|{sig}".encode()).decode()
 
