@@ -45,6 +45,46 @@ Project Image Page
 - [x] ทำให้ AI ส่งรูป กลับไปที่ Frontend ได้
 - [x] สร้าง API
 
+## การติดตั้ง
+
+ต้องใช้ **Python 3.12** (ห้ามใช้ 3.13 เพราะจะได้ OpenCV 5 ซึ่งทำให้เบลอใบหน้าใช้ไม่ได้)
+
+1. สร้าง virtual environment (แนะนำ)
+
+```
+   py -3.12 -m venv .venv
+   .venv\Scripts\activate
+```
+
+2. ติดตั้งไลบรารีทั้งหมด (frontend, backend และ AI ใช้ไฟล์เดียวกัน)
+
+```
+   pip install -r requirements.txt
+```
+
+3. เฉพาะเครื่อง AI: ติดตั้ง [Stable Diffusion Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) แยกต่างหาก แล้วเปิดด้วยแฟล็ก `--api`
+
+> ⚠️ ใช้ `onnxruntime` แบบ CPU เท่านั้น ห้ามติดตั้ง `onnxruntime-gpu` คู่กัน
+
+## การรันระบบ
+
+เปิดตามลำดับ: **AI → Backend → Frontend**
+
+| เครื่อง | คำสั่ง | พอร์ต |
+|---|---|---|
+| AI | `cd AI_server` แล้ว `uvicorn mainAI:app --host 0.0.0.0 --port 8000` | 8000 |
+| Backend | `cd backend` แล้ว `uvicorn mainBackend:app --host 127.0.0.1 --port 5051` (และเปิด nginx พอร์ต 5050) | 5050 |
+| Frontend | `python proxy.py user` | 8080 |
+| Staff Console | `python proxy.py admin` (เปิดได้เฉพาะในเครื่อง frontend) | 8090 |
+
+## การทดสอบ (ไม่บังคับ)
+
+```
+pip install pytest playwright
+python -m playwright install chromium
+pytest unit_test -v
+```
+
 
 ### จัดทำโดย
 นายสิรวิทย์ วิริยะอาทร 6710301021  
