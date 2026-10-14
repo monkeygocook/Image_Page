@@ -93,7 +93,7 @@ const ENDPOINTS = {
 
 /* ---------- การควบคุมการเข้าถึง ---------- */
 const REQUIRE_AUTH = true;          // true = ต้องล็อกอินก่อนใช้งานทุกฟังก์ชัน
-const SESSION_TTL_HOURS = 24;       // อายุ session (ชั่วโมง) หมดแล้วเด้งออกอัตโนมัติ
+const SESSION_TTL_HOURS = 96;       // อายุ session (ชั่วโมง) หมดแล้วเด้งออกอัตโนมัติ
 const ROLES = ["user", "staff"];    // สิทธิ์ทั้งหมดในระบบ
 const ADMIN_PAGE = "admin.html";    // หน้าเจ้าหน้าที่
 const APP_PAGE = "index.html";      // หน้าผู้ใช้ทั่วไป
@@ -520,4 +520,4 @@ const TAB_CONFIG = {
             },
         },
     },
-}; 
+}; 
