@@ -8,9 +8,19 @@
 
    ผลลัพธ์: เปลี่ยน API_MODE บรรทัดเดียว ระบบสลับโหมดได้ทันที
             โดย script.js และ admin.js ไม่ต้องแก้อะไรเลย
+
+   เส้นทางข้อมูล Frontend → Backend (โหมด live):
+   UI ใน script.js/admin.js เรียกเมธอดใน Api → เมธอดเตรียมข้อมูลและเรียก
+   request() → fetch(API_BASE + path) ส่ง HTTP ไปยัง Backend → แปลงคำตอบ
+   เป็นข้อมูล/ข้อผิดพลาดแล้วส่งกลับให้ UI ส่วนโหมด mock จะใช้ localStorage
+   หรือ canvas ในเบราว์เซอร์แทนการส่ง request ไป Backend
    ============================================================ */
 
-/** ข้อผิดพลาดมาตรฐานของระบบ — มี code ให้แปลเป็นภาษาผู้ใช้ได้ */
+/**
+ * ข้อผิดพลาดมาตรฐานของ API ที่ส่งกลับให้ UI
+ * รับ code, ข้อความ message และข้อมูลเสริม meta เช่น HTTP status/requestId
+ * เพื่อให้ UI แสดงข้อความได้ตรงประเภทและใช้ requestId ตรวจสอบ log ได้
+ */
 class ApiError extends Error {
     constructor(code, message, meta = {}) {
         super(message || code);
@@ -27,6 +37,7 @@ const Api = (() => {
     /* ========================================================
        ส่วนที่ 1 — สถานะการเชื่อมต่อ
        ======================================================== */
+    // mode คือ mock/live, online คือสถานะ Backend และ ready บอกว่า init() เสร็จแล้ว
     let mode = API_MODE === "live" ? "live" : "mock";
     let online = API_MODE === "mock";
     let ready = false;
@@ -40,15 +51,18 @@ const Api = (() => {
     const isLive = () => mode === "live";
     const isOnline = () => (isMock() ? true : online);
 
+    // แจ้งผู้สมัครรับสถานะทุกครั้งที่ mode/online/ready เปลี่ยน
     function emit() {
         const s = { mode, online: isOnline(), ready };
         statusFns.forEach((fn) => { try { fn(s); } catch { } });
     }
+    // อัปเดตสถานะเครือข่ายและแจ้ง UI เฉพาะเมื่อค่าเปลี่ยน
     function setOnline(v) { if (online !== v) { online = v; emit(); } }
 
     /* ========================================================
        ส่วนที่ 2 — Token & Session (ใช้ร่วมทั้ง 2 โหมด)
        ======================================================== */
+    // Token เก็บ access token สำหรับแนบ Authorization header ใน request()
     const Token = {
         get: () => localStorage.getItem(STORE + "token"),
         set: (v) => v
@@ -58,6 +72,7 @@ const Api = (() => {
 
     let expiredFlag = false;
 
+    // Session เก็บข้อมูลผู้ใช้/วันหมดอายุใน localStorage; u คือข้อมูลผู้ใช้จากการเข้าสู่ระบบ
     const Session = {
         /** อ่าน session พร้อมตรวจวันหมดอายุ — คืน null ถ้าหมดอายุแล้ว */
         load() {
@@ -87,12 +102,14 @@ const Api = (() => {
         ackExpired: () => { expiredFlag = false; },
     };
 
+    // สร้างคีย์ localStorage แยกข้อมูลตามอีเมลผู้ใช้; k คือชื่อข้อมูล เช่น notes
     const owner = () => Session.load()?.email || "guest";
     const uKey = (k) => `${STORE}${owner()}:${k}`;
 
     /* ========================================================
        ส่วนที่ 3 — ตัวส่ง request ระดับล่าง (โหมด live เท่านั้น)
        ======================================================== */
+    // หน่วงเวลา ms มิลลิวินาที และยกเลิกการรอได้ด้วย AbortSignal (signal)
     const sleep = (ms, signal) => new Promise((resolve, reject) => {
         const id = setTimeout(resolve, ms);
         signal?.addEventListener("abort", () => {
@@ -101,6 +118,11 @@ const Api = (() => {
         }, { once: true });
     });
 
+    /**
+     * จุดส่ง HTTP request กลางสำหรับ Backend
+     * path คือ endpoint; opts รับ method/body/headers/signal/auth/expect,
+     * timeout และจำนวน retry แล้วคืน JSON, Blob หรือ null ตาม expect
+     */
     async function request(path, opts = {}) {
         const {
             method = "GET", body, headers = {}, signal, auth = true,
@@ -173,15 +195,18 @@ const Api = (() => {
     /* ========================================================
        ส่วนที่ 4 — คลังข้อมูลจำลอง (mock)
        ======================================================== */
+    // อ่านรายชื่อผู้ใช้จำลองจาก localStorage; คืน array ว่างเมื่อไม่มี/อ่านข้อมูลไม่ได้
     const mockUsers = () => {
         try { return JSON.parse(localStorage.getItem(STORE + "users") || "[]"); }
         catch { return []; }
     };
+    // บันทึกรายชื่อผู้ใช้จำลอง list กลับลง localStorage
     const saveMockUsers = (list) => localStorage.setItem(STORE + "users", JSON.stringify(list));
 
     /* ⚠️ djb2 ไม่ใช่ cryptographic hash — ใช้ได้เฉพาะโหมด mock
        ระบบจริงต้องแฮชที่หลังบ้านด้วย argon2id หรือ bcrypt (cost >= 12)
        การแฮชฝั่ง client ไม่ช่วยความปลอดภัยเลย เพราะโค้ดเปิดให้อ่านได้ทุกคน */
+    // แปลงข้อความ s เป็นค่า hash อย่างง่ายสำหรับจำลองรหัสผ่านใน mock เท่านั้น
     const weakHash = (s) => {
         let h = 5381;
         for (const c of s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0;
@@ -189,12 +214,14 @@ const Api = (() => {
     };
 
     /* ไม่สร้างบัญชีเจ้าหน้าที่ตั้งต้น */
+    // เตรียมข้อมูลเจ้าหน้าที่เริ่มต้นใน mock (ไม่ทำงานเมื่อเป็น public mode)
     function ensureSeedStaff() {
         if (PUBLIC_MODE) return;        // ไม่สร้างบัญชีเจ้าหน้าที่ตั้งต้น
         const list = mockUsers();
         // ...(ส่วนที่เหลือคงเดิม)
     }
 
+    // กรองข้อมูลบัญชี u ให้เหลือเฉพาะฟิลด์ที่อนุญาตให้ UI ใช้/แสดง
     const publicUser = (u) => ({
         name: u.name, email: u.email,
         role: PUBLIC_MODE ? "user" : (u.role || "user"),   // บังคับ user เสมอ
@@ -205,6 +232,7 @@ const Api = (() => {
        ส่วนที่ 5 — เครื่องจำลองการประมวลผลภาพด้วย canvas
        (ทำหน้าที่แทน Backend ในโหมด mock)
        ======================================================== */
+    // โหลดภาพจาก src (เช่น URL preview) เป็น Image element; reject เมื่อถอดรหัสไม่ได้
     function loadImageEl(src) {
         return new Promise((resolve, reject) => {
             const im = new Image();
@@ -214,6 +242,7 @@ const Api = (() => {
         });
     }
 
+    // แปลง canvas cv เป็น Blob URL สำหรับแสดง/ดาวน์โหลด; mime ระบุชนิดไฟล์ผลลัพธ์
     function canvasToBlobURL(cv, mime) {
         return new Promise((resolve, reject) => {
             cv.toBlob(
@@ -227,6 +256,7 @@ const Api = (() => {
     }
 
     /** Tone — filter string ที่ผันตามสไลเดอร์ความเข้ม */
+    // สร้าง CSS filter ตามตัวเลือก o.tone และระดับ o.strength (0–100)
     function toneFilter(o) {
         const s = Math.min(1, Math.max(0, Number(o.strength ?? 70) / 100));
         return {
@@ -240,6 +270,7 @@ const Api = (() => {
     }
 
     /** Back — จำลองการตัดพื้นหลัง (ของจริงใช้โมเดล segmentation) */
+    // จำลองการตัดพื้นหลังบน canvas: ctx คือบริบทวาด, img คือภาพ, w/h คือขนาด, o.output คือสีพื้นหลัง
     function drawBackMock(ctx, img, w, h, o) {
         const out = o.output || "transparent";
         if (out !== "transparent") {
@@ -255,6 +286,7 @@ const Api = (() => {
     }
 
     /** Blur — เบลอ 6 รูปแบบ ผันตามสไลเดอร์ความเบลอ */
+    // จำลองเอฟเฟกต์เบลอบน canvas โดยรับชนิด o.blur_type และระดับ o.blur_amount
     function drawBlurMock(ctx, img, w, h, o) {
         const amt = Math.min(100, Math.max(0, Number(o.blur_amount ?? 40)));
         const px = Math.max(1, Math.round((amt / 100) * 26));
@@ -312,6 +344,11 @@ const Api = (() => {
         ctx.restore();
     }
 
+    /**
+     * ประมวลผลภาพในเบราว์เซอร์แทน Backend สำหรับ mock
+     * รับ tab/cfg/options, URL ภาพต้นฉบับ previewUrl และ signal สำหรับยกเลิก
+     * คืน URL ภาพจำลอง (หรือ URL placeholder สำหรับ text-to-image)
+     */
     async function mockProcessImage({ tab, cfg, options = {}, previewUrl, signal }) {
         await sleep(MOCK_DELAY_MS, signal);
 
@@ -348,7 +385,10 @@ const Api = (() => {
        ส่วนที่ 6 — เมธอดสาธารณะ (UI เรียกใช้ผ่านตรงนี้เท่านั้น)
        ======================================================== */
 
-    /** ตรวจสุขภาพเซิร์ฟเวอร์ — คืน object ถ้าตอบ, null ถ้าติดต่อไม่ได้ */
+    /**
+     * ตรวจสุขภาพ Backend ผ่าน GET health endpoint (ยกเว้น mock)
+     * ไม่รับ input; คืนข้อมูลสถานะ หรือ null เมื่อติดต่อ Backend ไม่ได้
+     */
     async function ping() {
         if (API_MODE === "mock") { setOnline(true); return { status: "mock" }; }
         try {
@@ -363,15 +403,20 @@ const Api = (() => {
         }
     }
 
+    // เริ่มตรวจสถานะ Backend ซ้ำทุก HEALTH_INTERVAL มิลลิวินาที
     function startPolling() {
         stopPolling();
         pollTimer = setInterval(ping, HEALTH_INTERVAL);
     }
+    // หยุด timer ที่ใช้ตรวจสถานะ Backend
     function stopPolling() {
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     }
 
-    /** เรียกครั้งเดียวตอนเปิดหน้า — ตัดสินใจโหมดแล้วล็อกไว้ทั้ง session */
+    /**
+     * เรียกตอนเปิดหน้าเพื่อเลือก mock/live/auto และเตรียมสถานะการเชื่อมต่อ
+     * คืน { mode, online }; ใน auto จะเลือก live เมื่อ Backend ตอบ health ได้
+     */
     async function init() {
         if (API_MODE === "mock") {
             mode = "mock"; online = true;
@@ -393,7 +438,9 @@ const Api = (() => {
     }
 
     /* ---------- Authentication ---------- */
+    // เมธอดบัญชีผู้ใช้: UI ส่งข้อมูลเข้าเมธอดเหล่านี้; live จะส่ง JSON ไป Backend
     const auth = {
+        // สมัครสมาชิกด้วย name/email/password; คืน user ที่เปิดเผยได้และ access_token
         async register({ name, email, password }) {
             if (isMock()) {
                 await sleep(350);
@@ -415,6 +462,7 @@ const Api = (() => {
             return { user: j.user, access_token: j.access_token };
         },
 
+        // เข้าสู่ระบบด้วย email/password; คืน user และ access_token หรือแจ้งข้อมูลรับรองไม่ถูกต้อง
         async login({ email, password }) {
             if (isMock()) {
                 await sleep(350);
@@ -432,6 +480,7 @@ const Api = (() => {
         },
 
         /** ตรวจว่า token ที่เก็บไว้ยังใช้ได้ไหม (ใช้ตอนเปิดหน้าในโหมด live) */
+        // ตรวจสอบตัวตนจาก session/token ปัจจุบัน; live เรียก endpoint /me
         async me() {
             if (isMock()) {
                 const s = Session.load();
@@ -441,6 +490,7 @@ const Api = (() => {
             return request(ENDPOINTS.me);
         },
 
+        // ออกจากระบบ: แจ้ง Backend ใน live (ถ้ามี token) แล้วล้าง session/token ในเครื่อง
         async logout() {
             if (isLive() && Token.get()) {
                 try { await request(ENDPOINTS.logout, { method: "POST", expect: "none", retry: 0 }); }
@@ -451,12 +501,15 @@ const Api = (() => {
     };
 
     /* ---------- ข้อมูลส่วนตัวของผู้ใช้ ---------- */
+    // อ่าน/บันทึกข้อมูลส่วนตัว; mock ใช้ localStorage ส่วน live เรียก Backend
     const userData = {
+        // อ่านบันทึกของผู้ใช้ปัจจุบัน; คืนข้อความ content (ว่างเมื่อไม่มีข้อมูล)
         async getNotes() {
             if (isMock()) return localStorage.getItem(uKey("notes")) || "";
             const j = await request(ENDPOINTS.notes);
             return j?.content || "";
         },
+        // บันทึก content ในเครื่องก่อน แล้วใน live ส่ง { content } แบบ PUT ไป Backend
         async saveNotes(content) {
             localStorage.setItem(uKey("notes"), content);   // เขียนในเครื่องก่อนเสมอ (ตอบสนองทันที)
             if (isMock()) return true;
@@ -467,6 +520,7 @@ const Api = (() => {
             });
             return true;
         },
+        // อ่านภาษาและการจัดแท็บ; live ขอค่าจาก Backend และใช้ค่าท้องถิ่นสำรองเมื่อเรียกไม่สำเร็จ
         async getPreferences() {
             const local = {
                 lang: localStorage.getItem(STORE + "lang") || "th",
@@ -480,6 +534,7 @@ const Api = (() => {
                 return local;                                // เซิร์ฟเวอร์ล่ม → ใช้ของในเครื่อง
             }
         },
+        // บันทึก lang และ/หรือ tabs; เก็บสำเนาใน localStorage และส่ง JSON แบบ PUT ใน live
         async savePreferences({ lang, tabs }) {
             if (lang) localStorage.setItem(STORE + "lang", lang);
             if (tabs) localStorage.setItem(uKey("tabs"), JSON.stringify(tabs));
@@ -494,6 +549,7 @@ const Api = (() => {
     };
 
     /* ---------- ประมวลผลภาพ ---------- */
+    // เตรียม body/headers ตามรูปแบบ endpoint: JSON สำหรับ prompt หรือ FormData สำหรับไฟล์ภาพ
     function buildBody({ cfg, file, prompt, negative, options = {} }) {
         if (cfg.contentType === "application/json") {
             const p = (prompt || "").trim();
@@ -510,15 +566,19 @@ const Api = (() => {
     }
     const image = {
         /**
+         * ส่งคำขอประมวลผลภาพจาก Frontend ไป Backend (POST cfg.endpoint)
+         * รับ tab/cfg, file หรือ prompt/negative, options, previewUrl, signal และ requestId
+         * JSON ใช้กับงาน prompt; FormData ใช้แนบไฟล์ชื่อ image พร้อม options
          * @returns {Promise<string>} URL ของภาพผลลัพธ์ (blob: หรือ http:)
          */
         async process({ tab, cfg, file, prompt, negative, options = {}, previewUrl, signal, requestId }) {
-            // 2) ตรงที่สร้าง headers ให้เพิ่มบรรทัดนี้
+            // requestId ใช้ผูกคำขอกับ log ฝั่ง Backend เพื่อช่วยติดตามปัญหา
             let headers = {};
 
             if (requestId) headers["X-Request-ID"] = requestId;
             /*
-            // โหมดจำลอง — ใช้เครื่องจำลอง canvas ในส่วนที่ 5
+            // บล็อก mock นี้ถูกปิดไว้; ปัจจุบัน process() จึงเรียก Backend ผ่าน request() เสมอ
+            // หากเปิดใช้ mock ต้องยกเลิกคอมเมนต์เพื่อใช้เครื่องจำลอง canvas ในส่วนที่ 5
             if (isMock()) return mockProcessImage({ tab, cfg, options, previewUrl, signal });
 
             let body, headers; */
@@ -552,9 +612,14 @@ const Api = (() => {
             return URL.createObjectURL(blob);
         },
 
-        // api.js — ใน image = { ... }
+        /**
+         * ส่งงานภาพแบบ asynchronous ไป Backend แล้วติดตามสถานะผ่าน SSE
+         * รับ cfg/file/prompt/negative/options และ signal; onStatus รับข้อมูลสถานะ
+         * เริ่มด้วย POST jobs, ยกเลิกด้วย DELETE, รับ event จน done/error/cancelled
+         * แล้วดาวน์โหลดผลลัพธ์เป็น Blob URL ให้ UI
+         */
         async processJob({ cfg, file, prompt, negative, options = {}, signal, onStatus }) {
-            // สร้าง body/headers เหมือน process() เดิม แล้วยิงไป /api/v1/jobs/<name>
+            // Frontend ส่งข้อมูลเริ่มงานไป Backend; name มาจากชื่อ endpoint ของฟังก์ชันภาพ
             const { body, headers } = buildBody({ cfg, file, prompt, negative, options });
             const name = cfg.endpoint.split("/").pop();
             const job = await request(`/api/v1/jobs/${name}`, { method: "POST", body, headers, signal, retry: 0 });
@@ -595,10 +660,12 @@ const Api = (() => {
     };
 
     /* ---------- งานเจ้าหน้าที่ ---------- */
+    // เมธอดจัดการบัญชีสำหรับหน้าผู้ดูแล; live ส่งคำขอไปยัง admin endpoints ของ Backend
     const admin = {
-        /** คีย์ที่ใช้อ้างถึงผู้ใช้ 1 คน — ระบบจริงใช้ id, mock ใช้ email */
+        /** รับบัญชี u แล้วคืนคีย์อ้างอิง; Backend ใช้ id ส่วน mock ใช้อีเมล */
         keyOf: (u) => u.id ?? u.email,
 
+        // ดึงรายชื่อผู้ใช้ทั้งหมด; คืน array ของข้อมูลผู้ใช้ที่เปิดเผยได้
         async list() {
             if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
             if (isMock()) {
@@ -609,6 +676,7 @@ const Api = (() => {
             return Array.isArray(j) ? j : (j?.users || []);
         },
 
+        // เปลี่ยนบทบาทบัญชี key เป็น role; live ส่ง PATCH พร้อม JSON { role }
         async setRole(key, role) {
             if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
             if (isMock()) {
@@ -634,6 +702,7 @@ const Api = (() => {
             return j?.user || j;
         },
 
+        // ลบบัญชี key; live ส่ง DELETE และคืน true เมื่อสำเร็จ
         async remove(key) {
             if (PUBLIC_MODE) throw new ApiError("FORBIDDEN", "ไม่มีสิทธิ์เข้าถึง");
             if (isMock()) {
@@ -657,6 +726,7 @@ const Api = (() => {
     };
 
     /* ---------- ล้างข้อมูลทั้งหมดในเครื่อง ---------- */
+    // ลบ localStorage เฉพาะรายการที่ขึ้นต้นด้วย STORE; ไม่ได้ลบข้อมูลบน Backend
     function wipeLocal() {
         Object.keys(localStorage)
             .filter((k) => k.startsWith(STORE))
@@ -664,6 +734,8 @@ const Api = (() => {
         if (isMock()) ensureSeedStaff();
     }
 
+    // API สาธารณะที่ script.js/admin.js เรียกใช้; onStatus รับ {mode, online, ready}
+    // ส่วน onUnauthorized รับ ApiError เมื่อ Backend ตอบ 401
     return {
         init, ping, startPolling, stopPolling, wipeLocal,
         isMock, isLive, isOnline,

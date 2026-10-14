@@ -36,7 +36,7 @@ DROP_REQ = {
 
 TARGETS = {
     "user":  {"dir": ROOT / "Image_index", "host": "0.0.0.0",   "port": 8080},
-    "admin": {"dir": ROOT / "admin_panel", "host": "127.0.0.1", "port": 8090},
+    "admin": {"dir": ROOT / "admin_panel", "host": "0.0.0.0", "port": 2026},
 }
 
 # connect=5: ถ้าหลังบ้านไม่ตอบ (ล่ม/โดนบล็อก) รู้ใน 5 วินาที ไม่ต้องรอ 180
