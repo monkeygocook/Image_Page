@@ -75,7 +75,49 @@ Project Image Page
 | AI | `cd AI_server` แล้ว `uvicorn mainAI:app --host 0.0.0.0 --port 8000` | 8000 |
 | Backend | `cd backend` แล้ว `uvicorn mainBackend:app --host 127.0.0.1 --port 5051` (และเปิด nginx พอร์ต 5050) | 5050 |
 | Frontend | `python proxy.py user` | 8080 |
-| Staff Console | `python proxy.py admin` (เปิดได้เฉพาะในเครื่อง frontend) | 8090 |
+| Staff Console | `python proxy.py admin` (เปิดได้เฉพาะในเครื่อง frontend) | 2026 |
+
+### ตั้งค่า nginx (เครื่อง Backend)
+
+nginx เปิดพอร์ต **5050** รับคำขอเฉพาะจากเครื่อง frontend แล้วส่งต่อให้ `mainBackend.py` ที่พอร์ต 5051
+
+1. ดาวน์โหลด nginx สำหรับ Windows จาก https://nginx.org/en/download.html แล้วแตกไฟล์ เช่น ไว้ที่ `C:\nginx`
+2. เปิด `C:\nginx\conf\nginx.conf` แล้ววางบล็อกนี้ไว้ **ข้างใน** `http { ... }` (หรือคัดลอกจาก `NginxCode.txt`)
+
+```nginx
+   server {
+       listen 5050;
+       server_name _;
+
+       allow 26.213.29.211;          # IP เครื่อง frontend ในวง Radmin
+       deny  all;
+
+       client_max_body_size 25m;
+
+       location /api/ {
+           proxy_pass http://127.0.0.1:5051;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-For $http_x_forwarded_for;   # ส่ง IP ผู้ใช้ที่ proxy.py ใส่มาต่อ
+           proxy_read_timeout 130s;
+           proxy_send_timeout 130s;
+       }
+
+       location / {
+           return 404;
+       }
+   }
+```
+
+3. สั่งงาน nginx (เปิด Command Prompt ในโฟลเดอร์ `C:\nginx`)
+
+```
+   start nginx            # เปิด
+   nginx -t               # ตรวจว่า config เขียนถูกไหม
+   nginx -s reload        # โหลด config ใหม่หลังแก้
+   nginx -s stop          # ปิด
+```
+
+> ถ้า IP ของเครื่อง frontend ใน Radmin เปลี่ยน ต้องแก้บรรทัด `allow` แล้วสั่ง `nginx -s reload`
 
 ## การทดสอบ (ไม่บังคับ)
 
