@@ -1,0 +1,24 @@
+# Image_Page — ไลบรารีทั้งหมดของ frontend + backend + AI
+# ติดตั้ง (จากโฟลเดอร์ Image_Page):   pip install -r requirements.txt
+# ใช้ Python 3.12 (3.13 จะได้ OpenCV 5 ซึ่งทำให้เบลอใบหน้าพัง)
+
+# ---------- ใช้ร่วมกัน ----------
+fastapi            # backend, AI
+uvicorn            # รันเซิร์ฟเวอร์ทุกเครื่อง
+starlette          # proxy.py (มากับ fastapi อยู่แล้ว ระบุไว้ให้ชัด)
+httpx              # proxy.py -> backend, backend -> AI
+python-multipart   # รับไฟล์อัปโหลด (backend, AI)
+pydantic
+pillow             # อ่าน/เขียนภาพ (backend, AI)
+
+# ---------- AI ----------
+requests                   # เรียก Stable Diffusion Forge
+numpy
+opencv-python-headless<5   # ฟิลเตอร์ ปรับสี หาใบหน้า (ห้ามเป็นเวอร์ชัน 5)
+rembg                      # ลบพื้นหลัง
+onnxruntime                # แบบ CPU เท่านั้น ห้ามลง onnxruntime-gpu คู่กัน
+
+# ---------- unit test (ไม่บังคับ) ----------
+# เอา # ออกถ้าจะรันเทสในเครื่องนี้
+# pytest>=8
+# playwright               # แล้วรัน: python -m playwright install chromium
